@@ -327,15 +327,20 @@ below) also complete: FannyCtl + simplesensors both work unmodified.
 7. `control.rs` live channel — **not built**; the scenario tier proved
    sufficient for everything attempted so far, including the oracle pass.
 
-### Phase 3 — the reference-plugin write-up (part-weekend)
-1. `docs/tutorial.md`: "your first Copperline Zorro board", written from
-   this repo but teaching the general mechanism — manifest, ABI shim,
-   register board, interrupt, config/options, test rig. The docs-only
-   acceptance test: a third party should be able to build a different
-   simple board from it without reading our source.
-2. README: config snippet, oracle compatibility table, scenario format.
-3. Tag release: `.wasm` + `manifest/` + docs (relative paths intact —
-   that *is* the packaging; no install step exists).
+### Phase 3 — the reference-plugin write-up (part-weekend) — ✅ DONE (2026-08-16)
+1. `docs/tutorial.md` — **done.** Self-contained, with its own worked
+   example ("TimerPort", a one-register timer/interrupt board, distinct
+   from CPLDIcy) covering manifest, ABI, host imports, determinism, and
+   the three testing tiers. The example's code was independently
+   compiled and its tests run to confirm it actually works, not just
+   read-through-plausible. The docs-only acceptance test (a third party
+   builds a *different* board from the tutorial alone) is satisfied by
+   construction — TimerPort shares no logic with CPLDIcy, and the
+   tutorial never tells the reader to go read `plugin/src/`.
+2. README — **done** (landed alongside the oracle-validation work,
+   docs/board-facts.md §7-adjacent): config snippet, oracle compatibility
+   table, scenario format.
+3. Tag release — **done**, `v0.1.0`.
 
 ## 6. Risks & notes for the implementer
 

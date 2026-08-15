@@ -1,12 +1,17 @@
 # copperline-plugin-cpldicy
 
-A [Copperline](https://gitlab.com/HenrykRichter/cpldicy) WASM Zorro
-plugin emulating Henryk Richter's **CPLDIcy** I2C card — a PCF8584-based
-Zorro II board, software-compatible with M. Boehmer's original ICY board
-— plus its authentic LTC2990 voltage/temperature monitor and
-Fanny-compatible MAX31760 fan controller, and a scriptable virtual I2C
-bus of teaching-sample peripherals (GPIO expander, EEPROM, LM75 sensor,
-PCF8583 clock).
+A [Copperline](https://github.com/CopperlineHQ/Copperline) WASM Zorro
+plugin emulating Henryk Richter's [CPLDIcy](https://gitlab.com/HenrykRichter/cpldicy)
+I2C card — a PCF8584-based Zorro II board, software-compatible with M.
+Boehmer's original ICY board — plus its authentic LTC2990 voltage/
+temperature monitor and Fanny-compatible MAX31760 fan controller, and a
+scriptable virtual I2C bus of teaching-sample peripherals (GPIO
+expander, EEPROM, LM75 sensor, PCF8583 clock).
+
+Also intended as a worked reference for Copperline's WASM Zorro plugin
+mechanism generally — see `docs/tutorial.md` for a from-scratch,
+self-contained tutorial with its own minimal worked example, if that's
+what brought you here rather than the I2C card itself.
 
 See `PLAN.md` for the implementation plan and phase breakdown, and
 `docs/board-facts.md` for the primary-source register-level facts this
