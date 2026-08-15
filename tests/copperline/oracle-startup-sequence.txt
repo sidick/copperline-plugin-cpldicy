@@ -1,0 +1,5 @@
+c/i2cscan >ORACLEOUT:01-i2cscan.log
+c/fannyctl VERBOSE >ORACLEOUT:02-fannyctl.log
+c/simplesensors >ORACLEOUT:03-simplesensors.log
+c/diagnostics >ORACLEOUT:04-diagnostics.log
+echo "done" >ORACLEOUT:00-done.log

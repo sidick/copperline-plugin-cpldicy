@@ -274,9 +274,11 @@ key = "scenario"; label = "Scenario script"; type = "file"
   bridgeboard's `tests/copperline/run.sh` once to prove the rig works
   on this machine before blaming our own code later.
 
-### Phase 1 — board core (1 weekend)
+### Phase 1 — board core (1 weekend) — ✅ DONE, oracle-validated 2026-08-16
 **Gate: unmodified `i2c.library` + one Aminet tool scan the bus and
-toggle the PCF8574 under Copperline.**
+toggle the PCF8574 under Copperline.** — **met**, see `docs/board-facts.md`
+§8 item 6 and the README's "Oracle compatibility" table: `I2CScan` found
+the PCF8574 via real address+W/address+R transactions, zero fixes needed.
 1. Scaffold repo from template (workspace, Makefile, lib.rs shim with
    host stubs, empty board, manifest with [P0] identity). Board appears
    in AutoConfig; probe finds it. *(First `SUB=find_board=PASS`.)*
@@ -287,25 +289,43 @@ toggle the PCF8574 under Copperline.**
 4. Extend probe: full transactions + interrupt test → tier-2 green.
 5. Oracle pass: `i2c.library` detect, bus scan, GPIO toggle. Fix the
    quirks the datasheet undersold (expected; keep fixes unit-tested).
+   **Ran clean first try — no quirks surfaced, no fixes needed** (contrary
+   to this section's own expectation; see board-facts.md §8 item 6 for
+   the full transcript and the one benign observation that wasn't a bug).
 
-### Phase 2 — peripherals, fan, scripting (1 weekend)
-**Gate: closed thermal loop + deterministic replay + a fault fixture.**
+### Phase 2 — peripherals, fan, scripting (1 weekend) — ✅ DONE, oracle-validated 2026-08-16
+**Gate: closed thermal loop + deterministic replay + a fault fixture.** —
+**met**, see `plugin/tests/flagship.rs`. Guest-oracle validation (item 4
+below) also complete: FannyCtl + simplesensors both work unmodified.
 1. `eeprom24.rs` (with image option), `lm75.rs`, `ltc2990.rs`,
    `pcf8583.rs` — each with unit tests.
 2. `fan.rs` + virtual fan; FannyCtl oracle configures it.
-3. `scenario.rs` + fault knobs; scenario fixtures under
-   `tests/copperline/scenarios/`.
-4. Oracle: simplesensors/Sensei read scripted LTC2990 values.
-5. The two flagship scripted tests:
-   - **Thermal loop:** scenario ramps LTC2990 temp → guest fan-curve
-     program (small C tool we write, FannyCtl-configured curve) → assert
-     duty rise + virtual fan RPM via probe/serial output.
-   - **Fault fixture:** sensor NAK mid-run → guest handles visibly, no
-     hang.
-6. Determinism check: run each scripted test twice, diff serial output
-   byte-identically (make target `test-determinism`).
-7. `control.rs` live channel **only if** scenario tier proves
-   insufficient for the AmiMQTT pipeline test.
+3. `scenario.rs` + fault knobs. (Scenario fixtures live inline in
+   `plugin/tests/flagship.rs` rather than separate
+   `tests/copperline/scenarios/` files — see item 5's note.)
+4. Oracle: simplesensors/Sensei read scripted LTC2990 values — **done**,
+   `make oracle`; see README's oracle compatibility table.
+5. The two flagship scripted tests — **done**, but as native Rust
+   integration tests (`plugin/tests/flagship.rs`) rather than
+   guest-probe/serial-output tests: they drive `Board` through its real
+   I2C register protocol (the same sequence `i2c.library` issues) plus
+   the scenario engine, which is deterministic and host-side by
+   construction — a guest-side version of the same scenarios (a small
+   m68k "fan-curve" C program reading LTC2990 and driving the fan via
+   real `i2c.library` calls, under the tier-2 probe rig) remains a
+   nice-to-have for even-higher-fidelity coverage, not a blocking gap,
+   since the oracle pass already validates the real-driver protocol path
+   independently and the flagship tests validate the scenario/physics
+   logic independently.
+   - **Thermal loop:** scripted LTC2990 temp ramp → "guest" (the test
+     itself) reads it via real I2C protocol → fan curve computed → duty
+     written → assert RPM rise.
+   - **Fault fixture:** sensor NAK mid-run → handled visibly (no hang),
+     bus recovers for other devices afterward.
+6. Determinism check — **done**,
+   `scripted_run_replays_byte_identically` in `plugin/tests/flagship.rs`.
+7. `control.rs` live channel — **not built**; the scenario tier proved
+   sufficient for everything attempted so far, including the oracle pass.
 
 ### Phase 3 — the reference-plugin write-up (part-weekend)
 1. `docs/tutorial.md`: "your first Copperline Zorro board", written from

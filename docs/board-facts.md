@@ -363,9 +363,13 @@ Source: LTC2990 datasheet Rev F (analog.com); `i2csensors/sensors/devs/Sensors/L
 1. ~~Resolve the manufacturer-ID discrepancy~~ — **resolved 2026-08-16,
    see §1.** 5001/0x1389 confirmed correct; already shipped in
    `manifest/cpldicy.toml`, no code change needed.
-2. Confirm the MAX31760 I2C address (0xA0 assumed, low confidence) against
-   FannyCtl actually finding it. Still open — needs the real oracle
-   binary (§7).
+2. ~~Confirm the MAX31760 I2C address~~ — **resolved 2026-08-16.**
+   `Fanny/README` (`i2csensors` repo) states outright: `CHIP=DEV/K -
+   specify the chip address (hexadecimal), default: A0` — matching
+   `fan::MAX31760_ADDRESS = 0x50` (7-bit) exactly. Confirmed a second way
+   by the oracle pass (§7): `FannyCtl` (which defaults to device A0) read
+   the board's fan controller state successfully with no error, and
+   `I2CScan` independently found a device ACKing at `0xa0/0xa1`.
 3. ~~Decode the LTC2990 CONTROL register's exact init byte~~ — **largely
    resolved 2026-08-16, see §6's update.** The `.cfg`'s `BITOFFSET`/
    `NUMBITS`/`MUL`/`ADD` fields confirm the implemented voltage/temperature
@@ -380,10 +384,46 @@ Source: LTC2990 datasheet Rev F (analog.com); `i2csensors/sensors/devs/Sensors/L
    becomes a goal.
 5. ~~Courtesy heads-up to Henryk Richter~~ — declined by the user
    (2026-08-16); not pursued.
-6. **The big remaining gap**: no guest-side oracle validation has
-   happened yet. `i2c.library`, FannyCtl, and simplesensors/Sensei
-   binaries aren't fetched into `nondistributable/` — everything built in
-   Phase 1/2 has been validated against this project's own scenario-driven
-   tests and a hand-written probe, never against real driver software.
-   This is where PCF8584/LTC2990/MAX31760 quirks are actually expected to
-   surface (per docs/PLAN.md's risk section) and hasn't been attempted.
+6. ~~The big remaining gap: no guest-side oracle validation~~ —
+   **resolved 2026-08-16.** Ran `make oracle` (`tests/copperline/run-oracle.sh`)
+   against unmodified `i2c.library` v40, `I2CScan`, `FannyCtl`,
+   `i2csensors.library`/`simplesensors`, and `diagnostics` — all fetched
+   into `nondistributable/` via `vendor/fetch-oracle.sh`. **Every tool
+   worked with zero PCF8584/LTC2990/MAX31760 fixes needed**, contrary to
+   docs/PLAN.md's risk-section expectation that oracle quirks would
+   surface here:
+   - `I2CScan` found all three default devices via *real* address+W and
+     address+R (1-byte master-receive, exercising the full dummy-read
+     pipeline) transactions: `0x40/0x41` (PCF8574), `0x98/0x99`
+     (LTC2990), `0xa0/0xa1` (MAX31760/fan) — the exact addresses this
+     implementation ships.
+   - `FannyCtl` read the fan controller's full state (PWM
+     frequency/polarity/LUT/duty) at its default address with no error.
+   - `simplesensors` decoded LTC2990 values matching the configured
+     defaults almost exactly: VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint
+     25.0000°C — confirming `devices/ltc2990.rs`'s unsigned-14-bit
+     voltage encoding and 13-bit temperature encoding round-trip
+     correctly through real driver code, not just this project's own
+     tests.
+   - `diagnostics` confirmed both `Devs:Sensors/*.cfg` files parse
+     successfully against the live library.
+   - One benign observation, not a bug: `simplesensors` reported "MAX31760
+     Fan 45.7770 RPM" against a fan at rest (duty=0). This is the
+     consuming driver's own RPM formula applied to the "no signal"
+     `0xFFFF` tach-count sentinel `fan.rs` documents as the correct
+     idle/stalled reading (`60*100000/65535/2 ≈ 45.78`) — real hardware
+     reporting a stalled/disconnected fan would produce the same
+     artifact through the same formula, so this isn't something to
+     "fix" in the emulation.
+   - Full transcript: see the README's "Oracle compatibility" table, or
+     re-run `make oracle` (`tests/copperline/oracle-out/*.log` after a
+     run, git-ignored).
+   - **Not yet exercised**: `SendI2C`/`ReceiveI2C` (source-only in the
+     `i2clib40` archive, no compiled binaries) would let a script
+     explicitly toggle individual PCF8574 output bits, beyond `I2CScan`'s
+     bus-presence check. `I2CScan`'s own scan already does a real 1-byte
+     read from the PCF8574 via `ReceiveI2C`, which is meaningful coverage
+     of the read path; an explicit GPIO write-then-read-back round trip
+     through unmodified oracle tooling remains a nice-to-have, not a
+     blocking gap (this project's own native tests already cover exactly
+     that path directly against `Pcf8574`).

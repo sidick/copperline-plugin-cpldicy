@@ -11,7 +11,13 @@ test:
 conformance: all
 	cd tests/copperline && ./run.sh
 
+fetch-oracle:
+	./vendor/fetch-oracle.sh
+
+oracle: all fetch-oracle
+	cd tests/copperline && ./run-oracle.sh
+
 clean:
 	cargo clean
 
-.PHONY: all test conformance clean
+.PHONY: all test conformance fetch-oracle oracle clean
