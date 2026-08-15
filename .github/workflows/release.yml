@@ -62,7 +62,7 @@ jobs:
           echo "BUNDLE_ZIP=${BUNDLE}.zip" >> "$GITHUB_ENV"
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.BUNDLE_ZIP }}
           generate_release_notes: true
