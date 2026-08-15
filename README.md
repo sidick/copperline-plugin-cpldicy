@@ -27,6 +27,28 @@ make test     # native unit + integration tests
 
 ## Using it
 
+### Via the GUI
+
+1. Launch Copperline with no `--config` (or with one you want to add the
+   board to) — it opens on the machine configuration screen.
+2. Click the **Zorro** tab in the category sidebar.
+3. Click **Add board...** — a native file picker opens ("Add Zorro board
+   metadata"). Browse to this repo's `manifest/cpldicy.toml` and select
+   it.
+4. The board appears with a header row (its declared name, "CPLDIcy
+   I2C") and one row per config option below it — toggle buttons for the
+   `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`fan` bools, a stepper
+   for `eeprom_size`, and **Browse**/**Clear** buttons for the `file`-typed
+   `eeprom_image`/`scenario` options (see the table below for what each
+   does).
+5. Click **Run** to boot with the board fitted, or use the **Save As**/
+   **Save default** actions at the bottom of the screen to persist this
+   configuration to a `.toml` file (or as Copperline's own default) for
+   next time — the GUI writes exactly the same `[[zorro]]` TOML shown
+   below, so a saved config remains hand-editable afterward.
+
+### Via a config file
+
 Add a `[[zorro]]` entry to a Copperline machine config pointing at the
 manifest:
 

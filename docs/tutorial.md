@@ -36,7 +36,7 @@ interrupt line.
 - `rustup target add wasm32-unknown-unknown`
 - A Copperline build (`copperline --version` should work)
 - `xdftool` (`pip install amitools`) if you want the headless
-  conformance-probe tier of testing (section 9)
+  conformance-probe tier of testing (section 10)
 - Optionally, an m68k cross-GCC (`m68k-amigaos-gcc`, e.g. via
   [bebbo's amiga-gcc](https://github.com/bebbo/amiga-gcc) or a Docker
   image built from it) — only needed for that same tier
@@ -352,7 +352,27 @@ cargo test                                            # native unit tests
 cargo build --release --target wasm32-unknown-unknown # the shipped module
 ```
 
-## 8. Determinism
+## 8. Loading your board into Copperline
+
+Two equivalent ways to fit `manifest/timerport.toml` into a running
+machine — the GUI is a front-end for the same `[[zorro]]` mechanism, so
+either produces (or reads) the identical config:
+
+- **GUI**: launch Copperline, click the **Zorro** tab, click **Add
+  board...**, and pick your manifest file in the native file dialog that
+  opens. The board appears with a config panel auto-generated from your
+  manifest's `[[option]]` entries (toggle buttons for `bool`, steppers
+  for `enum`/`int`, browse/clear for `file`, a text field for `string`).
+  **Save As**/**Save default** at the bottom of the screen writes the
+  resulting config out.
+- **Config file**: add a `[[zorro]]` entry by hand:
+  ```toml
+  [[zorro]]
+  metadata = "path/to/timerport-plugin/manifest/timerport.toml"
+  ```
+  and launch with `copperline --config that-file.toml`.
+
+## 9. Determinism
 
 If your board's state lives entirely in the `Board` struct owned by the
 `thread_local!` (as above), determinism and save-state support come for
@@ -365,7 +385,7 @@ The only way to break this:
   using them — real-world I/O is inherently non-deterministic. Don't
   declare capabilities you don't need.
 
-## 9. Testing your board
+## 10. Testing your board
 
 Three tiers work well, in increasing order of realism:
 
@@ -400,10 +420,10 @@ Three tiers work well, in increasing order of realism:
    tier, if you want to see the pattern for something more elaborate
    than TimerPort.)
 
-## 10. Common pitfalls checklist
+## 11. Common pitfalls checklist
 
 - [ ] `_start` is the first function *definition* in your probe's source
-      file (section 9).
+      file (section 10).
 - [ ] `read`/`write` handle `size` 1, 2, *and* 4 — don't assume the CPU
       only ever does byte accesses just because your registers are byte-
       wide.
@@ -420,7 +440,7 @@ Three tiers work well, in increasing order of realism:
       host call refuels a finite fuel budget; a single expensive `tick`
       can trap (and fault) your own board.
 
-## 11. Where to go from here
+## 12. Where to go from here
 
 TimerPort is deliberately as small as a board can usefully be. Real
 boards tend to grow in a few directions this tutorial didn't need to
