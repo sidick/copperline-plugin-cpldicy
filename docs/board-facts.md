@@ -6,9 +6,11 @@ the datasheets are proprietary references, likewise cited not copied.
 Everything here is quoted/paraphrased from primary sources with citations,
 gathered 2026-08-15.
 
-Two low-confidence items are flagged explicitly below — do not build
-register-timing-critical logic on them without a second check against a
-real board or the CPLD source directly.
+One low-confidence item remains flagged below — do not build
+register-timing-critical logic on it without a second check against a
+real board or the CPLD source directly. The manufacturer-ID discrepancy
+noted in earlier drafts of this document is **resolved** (2026-08-16,
+see §1) — 5001/0x1389 is confirmed correct and is what's shipped.
 
 ---
 
@@ -18,27 +20,56 @@ Source: `Logic/IcyCPLD.vhd` autoconfig process, `gitlab.com/HenrykRichter/cpldic
 
 | Field | Value | Note |
 |---|---|---|
-| Manufacturer ID | **0x0A1C** (2588 decimal) | "a1k.org", same as the original M. Böhmer ICY board |
+| Manufacturer ID | **0x1389** (5001 decimal, "VMC") | see resolution below |
 | Product ID | **0x0F** (15 decimal) | matches `i2c.library`'s hardcoded scan (see §6) |
 | Board type | Zorro II, no add-memory, no boot ROM | `Er_Type = 1100` nibble |
 | Board size | **64 KB** | `Er_BoardSize = 0001` |
 | Serial | `0x1CE1CEBB` (current rev 0.04); `0x1CEDECAF` (rev 0.03); `0x1CECAFFE` (rev 0.01/0.02) | cosmetic; any fixed value is fine for the emulation |
 
-**Note:** `i2c.library`'s AutoConfig scan uses manufacturer **5001** / product **15**
-(decimal) per its source (`bcu.i`) and the independent Linux `i2c-icy`
-driver (`ZORRO_ID(VMC,15,0)`) — **0x0A1C = 2588, not 5001.** These don't
-match. Resolve this discrepancy in Phase 1 before trusting either value —
-most likely one research pass read a different manufacturer-ID encoding
-(Zorro IDs are sometimes quoted as the raw AutoConfig nibbles vs. the
-final resolved 16-bit ID, and 5001 might be M. Böhmer's *original* ICY
-manufacturer ID with CPLDIcy deliberately reusing it while 0x0A1C is a
-misread of the VHDL comment, or vice versa). **Action for Phase 1:** grep
-`i2c.library`'s actual detection call again and cross-check against a
-real `IcyCPLD.vhd` build/simulation output (or ask Henryk Richter
-directly, which is on the agenda anyway per the courtesy heads-up). Ship
-whichever value makes `i2c.library`'s unmodified `FindConfigDev` actually
-find the board — that behavioral test is definitive regardless of which
-research summary is right.
+**Resolved discrepancy (2026-08-16).** An earlier research pass read a
+VHDL comment — `Logic/IcyCPLD.vhd`, `when "001011" => Dout1 <= "0110" ;
+--Ventor ID 3 : $0A1C: A1K.org` — as the manufacturer ID, which
+conflicted with `i2c.library`'s own hardcoded scan value (5001/0x1389,
+corroborated independently by Linux's `i2c-icy` driver matching
+`ZORRO_ID(VMC,15,0)`). Re-derived the ID directly from the VHDL's actual
+emitted bits instead of trusting the comment:
+
+- Zorro AutoConfig transmits each nibble bitwise-complemented (standard
+  hardware convention — the CPLD drives the ones'-complement on
+  D31-D28, which `expansion.library` inverts back on read). The four
+  "Ventor ID" case arms emit `Dout1 = 1110, 1100, 0111, 0110`;
+  complementing each nibble gives `0001, 0011, 1000, 1001` = **0x1389 =
+  5001 decimal** — not `0x0A1C`.
+- Cross-check: the Product-ID nibble (`Dout1 <= "0000"`, case
+  `"000011"`) complements to `1111 = 0xF = 15`, exactly matching the
+  independently-known product ID — confirming the complement convention
+  is being applied correctly here.
+- Linux's `drivers/zorro/zorro.ids` lists `1389  VMC` (no entry exists
+  anywhere for `0x0A1C`/2588 — it isn't a registered Zorro manufacturer
+  ID at all).
+- Big Book of Amiga Hardware's entry for the *original* M. Boehmer ICY
+  board notes it deliberately used an expansion port "compatible with
+  the VMC ISDN Blaster" — i.e. CPLDIcy riding on manufacturer ID 5001
+  is intentional software-compatibility with the original board, not a
+  new identity.
+- Conclusion: **the `$0A1C: A1K.org` VHDL comment is a stale/incorrect
+  annotation**, almost certainly left over from the a1k.org A3000DB CPLD
+  source this file was forked from (per the file's own header:
+  `Company: a1k.org / Engineer: Matthias Heinrichs (AA3000DB), adapted
+  for CPLDICY by Henryk Richter`) — the actual `Dout1` constants were
+  changed to emit VMC's ID for ICY compatibility, but the comment text
+  wasn't updated to match. `0x0A1C` never appears on the real Zorro bus.
+- **`manifest/cpldicy.toml` already ships `manufacturer = 0x1389`** (it
+  was chosen as the pragmatic "whichever value makes `i2c.library` find
+  the board" default in Phase 1, per the note this replaces) — no code
+  change needed, this just upgrades that choice from "pragmatic
+  workaround" to "independently confirmed correct."
+- Not independently confirmed via the CPLDIcy repo's own commit history
+  (GitLab's web UI wouldn't render for automated fetching); a maintainer
+  commit message would be the last mile of certainty if ever needed, but
+  the bit-level re-derivation plus two independent external
+  corroborations (Linux `zorro.ids`, Big Book of Amiga Hardware) leave
+  little real doubt.
 
 ## 2. Register map / byte-lane decoding
 
@@ -259,6 +290,40 @@ Source: LTC2990 datasheet Rev F (analog.com); `i2csensors/sensors/devs/Sensors/L
   datasheet's CONTROL register table in Phase 1 when implementing
   `devices/ltc2990.rs` (Mode Select b[4:3]/b[2:0] per the datasheet — the
   general register semantics are in this doc's "generic chip facts" below).
+
+  **Update (2026-08-16), full `LTC2990.cfg` fetched and read directly**
+  (`i2csensors/sensors/devs/Sensors/LTC2990.cfg`, headed "configuration
+  for ICYv2 board: defaults in control register (INIT=0118)... two
+  voltages and two temperature readings"):
+  ```
+  [LTC2990]
+  I2CADDRESS = 0x98
+  INIT       = 00001800
+  TYPE=TEMP     READPRE=04 READBYTES=2 MUL=0.0625    BITOFFSET=3 NUMBITS=13   # Tint
+  TYPE=VOLTAGE  READPRE=0e READBYTES=2 MUL=0.00030518 BITOFFSET=2 NUMBITS=14 ADD=8192  # VCC
+  TYPE=VOLTAGE  READPRE=06 READBYTES=2 MUL=0.00061    BITOFFSET=2 NUMBITS=14  # V1, 5V/LSB
+  TYPE=VOLTAGE  READPRE=08 READBYTES=2 MUL=0.00122    BITOFFSET=2 NUMBITS=14  # V2, 12V/LSB
+  TYPE=TEMP     READPRE=0a READBYTES=4 MUL=0.0625    BITOFFSET=3 NUMBITS=13   # external diode
+  ```
+  This **confirms** (not just corroborates) `plugin/src/devices/ltc2990.rs`'s
+  implementation choice: `BITOFFSET=2, NUMBITS=14` for V1/V2/VCC means the
+  real driver reads those as a **plain unsigned 14-bit field** (skip the
+  top 2 status bits of the 16-bit word, take the next 14, multiply
+  directly by `MUL`, no sign handling) — exactly
+  `encode_voltage14_unsigned`'s model, not the sign-magnitude reading the
+  datasheet's prose alone suggested (which the code's own doc comment had
+  flagged as a simplification worth double-checking — this closes that
+  loop). VCC's `ADD=8192` is the 2.5V offset in raw counts
+  (`8192 × 0.00030518 ≈ 2.5000`), matching the implementation's `- 2.5`/`+
+  2.5` handling exactly. `BITOFFSET=3, NUMBITS=13` for temperature
+  likewise confirms the 13-bit-after-3-status-bits format already
+  implemented. **Not fully resolved:** the external-temp channel reads
+  `READBYTES=4` (0x0A-0x0D) where the current implementation only backs
+  0x0A/0x0B with real data (0x0C/0x0D read as zero) — plausibly the driver
+  just reads a fixed 4-byte window and only bit-extracts from the first
+  two bytes (consistent with what's implemented), but the `.cfg` format
+  alone doesn't prove that; `sensors/src/config.c`'s parser would need
+  reading to be certain. Low priority: no current test depends on it.
 - Generic chip facts (any LTC2990, useful for the device model regardless
   of exact config bits):
   - STATUS (0x00): b0=Busy, b1=T_INT ready, b2=V1/TR1/V1-V2 ready,
@@ -293,19 +358,32 @@ Source: LTC2990 datasheet Rev F (analog.com); `i2csensors/sensors/devs/Sensors/L
   the datasheet; don't over-fit the emulation to timing nuances the real
   board itself doesn't guarantee.
 
-## 8. Open items for Phase 1
+## 8. Open items
 
-1. **Resolve the manufacturer-ID discrepancy (§1)** — 0x0A1C (VHDL) vs.
-   5001 decimal (`i2c.library`/Linux driver) — before writing the
-   manifest. Ground truth = whichever value gets unmodified `i2c.library`
-   to actually find the board.
+1. ~~Resolve the manufacturer-ID discrepancy~~ — **resolved 2026-08-16,
+   see §1.** 5001/0x1389 confirmed correct; already shipped in
+   `manifest/cpldicy.toml`, no code change needed.
 2. Confirm the MAX31760 I2C address (0xA0 assumed, low confidence) against
-   FannyCtl actually finding it.
-3. Decode the LTC2990 CONTROL register's exact init byte from the
-   `.cfg`'s `00001800` value against the datasheet's mode-select table
-   when writing `devices/ltc2990.rs`.
+   FannyCtl actually finding it. Still open — needs the real oracle
+   binary (§7).
+3. ~~Decode the LTC2990 CONTROL register's exact init byte~~ — **largely
+   resolved 2026-08-16, see §6's update.** The `.cfg`'s `BITOFFSET`/
+   `NUMBITS`/`MUL`/`ADD` fields confirm the implemented voltage/temperature
+   decode is correct. The raw `INIT=00001800` control-register byte
+   sequence's exact bit-for-bit meaning is still not derived from the
+   datasheet's mode table, but nothing in the current implementation
+   depends on decoding it (CONTROL is stored/returned as written, not
+   interpreted — `plugin/src/devices/ltc2990.rs`'s documented
+   simplification). Low priority.
 4. The `CTRL`/DTACK-generation CPLD input (§2) — low confidence on which
    physical PCF8584 pin it is; irrelevant unless timing-accurate DTACK
    becomes a goal.
-5. Courtesy heads-up to Henryk Richter is still a user action (per
-   PLAN.md Phase 0), not something this research pass can do.
+5. ~~Courtesy heads-up to Henryk Richter~~ — declined by the user
+   (2026-08-16); not pursued.
+6. **The big remaining gap**: no guest-side oracle validation has
+   happened yet. `i2c.library`, FannyCtl, and simplesensors/Sensei
+   binaries aren't fetched into `nondistributable/` — everything built in
+   Phase 1/2 has been validated against this project's own scenario-driven
+   tests and a hand-written probe, never against real driver software.
+   This is where PCF8584/LTC2990/MAX31760 quirks are actually expected to
+   surface (per docs/PLAN.md's risk section) and hasn't been attempted.
