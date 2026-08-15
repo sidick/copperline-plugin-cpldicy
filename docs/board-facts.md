@@ -1,6 +1,6 @@
 # Board facts (Phase 0)
 
-Consolidated findings for the [P0] items in `PLAN.md` §1. Facts only,
+Consolidated findings from this project's initial research phase. Facts only,
 never copied source — the CPLDIcy repo is CC-licensed and read-not-vendored;
 the datasheets are proprietary references, likewise cited not copied.
 Everything here is quoted/paraphrased from primary sources with citations,

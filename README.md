@@ -13,9 +13,11 @@ mechanism generally — see `docs/tutorial.md` for a from-scratch,
 self-contained tutorial with its own minimal worked example, if that's
 what brought you here rather than the I2C card itself.
 
-See `PLAN.md` for the implementation plan and phase breakdown, and
-`docs/board-facts.md` for the primary-source register-level facts this
-emulation is built from.
+See `docs/board-facts.md` for the primary-source register-level facts
+this emulation is built from. Open follow-up work is tracked as
+[GitHub issues](https://github.com/sidick/copperline-plugin-cpldicy/issues)
+rather than a standing plan doc, now that the initial implementation is
+complete.
 
 ## Installation
 

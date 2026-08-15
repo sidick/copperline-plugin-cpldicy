@@ -1,10 +1,10 @@
 name: Release
 
 # Builds the release wasm32 plugin and publishes a downloadable bundle
-# whenever a version tag is pushed (see PLAN.md section 5 Phase 3 item
-# 3: "the .wasm + manifest/ + docs, relative paths intact -- that IS
-# the packaging; no install step exists"). The bundle mirrors the
-# repo's own directory layout exactly, so manifest/cpldicy.toml's
+# whenever a version tag is pushed: the .wasm + manifest/ + docs, with
+# relative paths intact -- that IS the packaging; no install step
+# exists. The bundle mirrors the repo's own directory layout exactly,
+# so manifest/cpldicy.toml's
 # relative `wasm = "../target/wasm32-unknown-unknown/release/..."` path
 # resolves unchanged inside it -- someone who just wants the board
 # (Copperline's GUI "Add board..." file picker, or a [[zorro]] config
@@ -56,7 +56,7 @@ jobs:
           cp target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm \
              "$BUNDLE/target/wasm32-unknown-unknown/release/"
           cp docs/*.md "$BUNDLE/docs/"
-          cp README.md PLAN.md "$BUNDLE/"
+          cp README.md LICENSE "$BUNDLE/"
 
           zip -r "${BUNDLE}.zip" "$BUNDLE"
           echo "BUNDLE_ZIP=${BUNDLE}.zip" >> "$GITHUB_ENV"
