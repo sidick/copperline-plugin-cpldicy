@@ -160,3 +160,14 @@ either `m68k-amigaos-gcc` on `PATH` or Docker for the tier-2 probe build
 prereqs). The fetched binaries land in `nondistributable/` (git-ignored,
 never committed — see `vendor/fetch-oracle.sh` for provenance/licensing
 notes on each).
+
+## License
+
+BSD 2-Clause — see `LICENSE`. Chosen deliberately for the "reference
+plugin" goal: permissive enough that anyone can copy this repo's
+patterns (or the tutorial's `TimerPort` example) into their own plugin,
+under any license, without being pulled into copyleft terms. This is
+independent of, and doesn't resolve, the separate question of whether a
+Copperline plugin is itself a derivative work of GPLv3 Copperline —
+Copperline's own `LICENSE` and `docs/` carry no explicit plugin/linking
+exception either way.
