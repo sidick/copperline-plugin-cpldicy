@@ -1,0 +1,22 @@
+# CPLDIcy I2C card -- AutoConfig identity and Copperline plugin manifest.
+# See docs/board-facts.md sections 1-3 for the sourcing of every field
+# below, and section 8 item 1 for the open manufacturer-ID question.
+
+name = "CPLDIcy I2C"
+zorro = 2
+type = "wasm"
+size = "64K"
+
+# docs/board-facts.md flags a real discrepancy here: the CPLDIcy VHDL
+# source (Logic/IcyCPLD.vhd) comments this as manufacturer 0x0A1C, but
+# i2c.library's own driver source (bcu.i) and the independent Linux
+# i2c-icy driver both hardcode manufacturer 5001 decimal (0x1389) /
+# product 15. Shipping the i2c.library value here since the Phase 1 gate
+# is "unmodified i2c.library finds the board" -- that behavioral test is
+# the actual ground truth, not either research pass alone. Revisit if a
+# real board or Henryk Richter's reply resolves the discrepancy.
+manufacturer = 0x1389 # 5001 decimal
+product = 15          # 0x0F
+
+wasm = "../target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm"
+int2 = true

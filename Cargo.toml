@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["plugin"]
+
+# The shipped artifact is the wasm32-unknown-unknown release build; size
+# matters because users download it. Same profile as the bridgeboard and
+# hostsocket sibling plugins.
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true

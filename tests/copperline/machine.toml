@@ -1,0 +1,25 @@
+# Copperline machine profile for the headless conformance probe
+# (docs/PLAN.md section 4 tier 2). Plain 68000, turbo floppy boot, plus
+# this project's own [[zorro]] entry loading the CPLDIcy board.
+
+[cpu]
+model = "68000"
+
+[memory]
+chip = "512K"
+slow = "512K"
+
+[floppy]
+drives = 1
+speed = 0 # turbo: instant floppy DMA, no realistic seek/rotation delay
+
+[floppy.df0]
+path = "minimal-boot.adf" # built fresh by run.sh via xdftool
+write_protected = true
+
+[[zorro]]
+metadata = "../../manifest/cpldicy.toml"
+
+[emulation]
+power_on = true
+warp_speed = "max"

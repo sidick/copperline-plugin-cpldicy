@@ -1,0 +1,17 @@
+[package]
+name = "cpldicy-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Copperline WASM Zorro board: CPLDIcy I2C card (PCF8584, ICY-compatible)"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+# "cdylib" is what actually ships (the wasm32-unknown-unknown board). "rlib"
+# is added so `cargo test` (native target) can link a normal test harness
+# against this crate -- without it, the native test binary silently exits
+# before running anything, since a cdylib-only artifact isn't something a
+# native binary can link against as a library.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
