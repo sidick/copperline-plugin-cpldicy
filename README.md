@@ -17,36 +17,52 @@ See `PLAN.md` for the implementation plan and phase breakdown, and
 `docs/board-facts.md` for the primary-source register-level facts this
 emulation is built from.
 
-## Getting it
+## Installation
 
-**Just want to use the board?** Download the latest release's `.zip` from
-the [Releases page](https://github.com/sidick/copperline-plugin-cpldicy/releases)
-— no Rust toolchain needed. It unpacks to a `manifest/` and a
-`target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm` in the same
-relative layout as this repo, so `manifest/cpldicy.toml` inside it works
-unmodified — point Copperline's GUI "Add board..." picker (or a
-`[[zorro]]` config entry) straight at that file. Each tagged release is
-built and published automatically (`.github/workflows/release.yml`),
-gated on the full test suite passing.
+There is no install step in the traditional sense — nothing gets copied
+into Copperline's own directories. A plugin is just a manifest file plus
+a `.wasm` file next to it; Copperline reads them from wherever you keep
+them, and only cares about the path to the manifest.
 
-**Want to read, extend, or verify it?** Build from source:
+### Step 1: get the files
+
+**Option A — download, no toolchain needed.** Grab the latest release's
+`.zip` from the [Releases page](https://github.com/sidick/copperline-plugin-cpldicy/releases)
+and unzip it somewhere you'll keep it (don't move the files around
+inside — `manifest/cpldicy.toml`'s reference to the `.wasm` is a
+relative path, so the two must stay in the same relative positions
+you unzipped them in). Each tagged release is built and published
+automatically (`.github/workflows/release.yml`), gated on the full test
+suite passing, so any release you download has already passed CI.
+
+**Option B — build from source.**
 
 ```sh
+git clone https://github.com/sidick/copperline-plugin-cpldicy
+cd copperline-plugin-cpldicy
 rustup target add wasm32-unknown-unknown
 make          # builds target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm
-make test     # native unit + integration tests
+make test     # optional: native unit + integration tests
 ```
 
-## Using it
+Either way, you end up with the same two things: a `manifest/cpldicy.toml`
+and, alongside it (one directory up, at
+`target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm`), the
+compiled plugin the manifest points at.
 
-### Via the GUI
+### Step 2: point Copperline at the manifest
+
+Pick whichever of these two is more convenient — they produce/read the
+identical configuration, so you can also switch between them later.
+
+**Via the GUI:**
 
 1. Launch Copperline with no `--config` (or with one you want to add the
    board to) — it opens on the machine configuration screen.
 2. Click the **Zorro** tab in the category sidebar.
 3. Click **Add board...** — a native file picker opens ("Add Zorro board
-   metadata"). Browse to this repo's `manifest/cpldicy.toml` and select
-   it.
+   metadata"). Browse to the `manifest/cpldicy.toml` from step 1 and
+   select it.
 4. The board appears with a header row (its declared name, "CPLDIcy
    I2C") and one row per config option below it — toggle buttons for the
    `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`fan` bools, a stepper
@@ -56,19 +72,22 @@ make test     # native unit + integration tests
 5. Click **Run** to boot with the board fitted, or use the **Save As**/
    **Save default** actions at the bottom of the screen to persist this
    configuration to a `.toml` file (or as Copperline's own default) for
-   next time — the GUI writes exactly the same `[[zorro]]` TOML shown
-   below, so a saved config remains hand-editable afterward.
+   next time — the GUI writes exactly the `[[zorro]]` TOML shown below,
+   so a saved config remains hand-editable afterward.
 
-### Via a config file
-
-Add a `[[zorro]]` entry to a Copperline machine config pointing at the
-manifest:
+**Via a config file:** add a `[[zorro]]` entry to a Copperline machine
+config pointing at the manifest, then launch with `copperline --config
+that-file.toml`:
 
 ```toml
 [[zorro]]
-metadata = "path/to/copperline-plugin-cpldicy/manifest/cpldicy.toml"
+metadata = "path/to/cpldicy-plugin/manifest/cpldicy.toml"
 config = { ltc2990 = "true", fan = "true", scenario = "my-scenario.txt" }
 ```
+
+That's the whole install: no files land anywhere Copperline itself
+manages, and removing the board later is just deleting the `[[zorro]]`
+entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 
 ### Config options
 
