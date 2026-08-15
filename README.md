@@ -17,7 +17,19 @@ See `PLAN.md` for the implementation plan and phase breakdown, and
 `docs/board-facts.md` for the primary-source register-level facts this
 emulation is built from.
 
-## Building
+## Getting it
+
+**Just want to use the board?** Download the latest release's `.zip` from
+the [Releases page](https://github.com/sidick/copperline-plugin-cpldicy/releases)
+— no Rust toolchain needed. It unpacks to a `manifest/` and a
+`target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm` in the same
+relative layout as this repo, so `manifest/cpldicy.toml` inside it works
+unmodified — point Copperline's GUI "Add board..." picker (or a
+`[[zorro]]` config entry) straight at that file. Each tagged release is
+built and published automatically (`.github/workflows/release.yml`),
+gated on the full test suite passing.
+
+**Want to read, extend, or verify it?** Build from source:
 
 ```sh
 rustup target add wasm32-unknown-unknown

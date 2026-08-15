@@ -4,3 +4,4 @@
 /tests/copperline/oracle-boot.adf
 /tests/copperline/oracle-out/*.log
 /nondistributable/
+.DS_Store
