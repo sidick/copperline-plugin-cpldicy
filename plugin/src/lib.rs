@@ -10,83 +10,242 @@
 //!   START/STOP/data transaction state machine.
 //! - [`i2c`] -- the virtual bus: [`i2c::I2cDevice`] and the registry
 //!   [`pcf8584::Pcf8584`] drives transactions through.
-//! - [`devices`] -- bus residents (just the PCF8574 GPIO expander in
-//!   Phase 1).
+//! - [`devices`] -- bus residents (PCF8574, EEPROM24, LM75, LTC2990,
+//!   PCF8583).
+//! - [`fan`] -- the MAX31760 fan controller and its virtual fan.
 //! - [`board`] -- CPLDIcy's own address decode (byte lanes, register
-//!   mirroring) wiring the chip model to the bus.
+//!   mirroring) wiring the chip model to the bus and the optional
+//!   devices together.
+//! - [`scenario`] -- the deterministic cck-keyed event timeline
+//!   (docs/PLAN.md section 3.6), driven from the `scenario` config
+//!   resource.
 //!
-//! All mutable state lives inside [`BOARD`]'s `RefCell`, reachable from
+//! All mutable state lives inside [`STATE`]'s `RefCell`, reachable from
 //! linear memory -- Copperline's save states only snapshot linear memory,
 //! never WASM globals (docs/zorro.md), so nothing here may use `static
 //! mut` or hold state any other way.
 
+// The host-config wiring below (config_get/resource_* imports,
+// board_config_from_host, scenario_from_host, PluginState) is only ever
+// reached from the wasm32-gated ABI exports -- native tests build a
+// Board/Scenario directly instead (see host_stubs's own doc comment), so
+// this code is genuinely unreachable under `cargo test` too, not just a
+// plain native build. Unlike copperline-bridgeboard-plugin's `Board`
+// (which its own tests drive directly), nothing here overlaps with what
+// the tests exercise.
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+
 pub mod board;
 pub mod devices;
+pub mod fan;
 pub mod i2c;
 pub mod pcf8584;
+pub mod scenario;
 
-use board::Board;
+use board::{Board, BoardConfig};
 use core::cell::RefCell;
+use scenario::Scenario;
 
 // ---------------------------------------------------------------------------
 // Host imports (Copperline plugin ABI, module "env"). Signatures follow
-// docs/zorro.md. Only `log` is used in Phase 1 -- config_get/resource_*
-// land in Phase 2 with the scenario/EEPROM-image config surface.
+// docs/zorro.md.
 // ---------------------------------------------------------------------------
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "env")]
 extern "C" {
     fn log(ptr: i32, len: i32);
+    fn config_get(key_ptr: i32, key_len: i32, out_ptr: i32, out_cap: i32) -> i32;
+    fn resource_len(key_ptr: i32, key_len: i32) -> i32;
+    fn resource_read(key_ptr: i32, key_len: i32, off: i32, out_ptr: i32, out_cap: i32) -> i32;
 }
 
-// Native stub so `cargo test` links and unit tests can drive the board
-// directly without a WASM host present.
+// Native stubs so `cargo test` links and unit tests can drive the board
+// directly without a WASM host present. All config/resource lookups
+// report "absent" -- native tests build a `Board`/`Scenario` directly
+// instead of going through `init()`'s host-config path.
 #[cfg(not(target_arch = "wasm32"))]
 mod host_stubs {
     #[allow(unused_variables)]
     pub unsafe fn log(ptr: i32, len: i32) {}
+    #[allow(unused_variables)]
+    pub unsafe fn config_get(key_ptr: i32, key_len: i32, out_ptr: i32, out_cap: i32) -> i32 {
+        -1
+    }
+    #[allow(unused_variables)]
+    pub unsafe fn resource_len(key_ptr: i32, key_len: i32) -> i32 {
+        -1
+    }
+    #[allow(unused_variables)]
+    pub unsafe fn resource_read(
+        key_ptr: i32,
+        key_len: i32,
+        off: i32,
+        out_ptr: i32,
+        out_cap: i32,
+    ) -> i32 {
+        -1
+    }
 }
 #[cfg(not(target_arch = "wasm32"))]
 use host_stubs::*;
 
 /// Log a line through the host (`wasm[cpldicy]: ...` in Copperline's own
 /// log, per docs/zorro.md).
-#[allow(dead_code)]
 pub fn host_log(msg: &str) {
     unsafe { log(msg.as_ptr() as i32, msg.len() as i32) }
 }
 
+/// Read a string setting (manifest `[config]` defaults layered under the
+/// user's per-board overrides). `None` if absent.
+fn config_get_string(key: &str) -> Option<String> {
+    let mut buf = [0u8; 256];
+    let n = unsafe {
+        config_get(
+            key.as_ptr() as i32,
+            key.len() as i32,
+            buf.as_mut_ptr() as i32,
+            buf.len() as i32,
+        )
+    };
+    if n < 0 {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&buf[..(n as usize).min(buf.len())]).into_owned())
+}
+
+fn config_get_bool(key: &str, default: bool) -> bool {
+    match config_get_string(key).as_deref() {
+        Some("true") | Some("1") => true,
+        Some("false") | Some("0") => false,
+        _ => default,
+    }
+}
+
+fn config_get_usize(key: &str, default: usize) -> usize {
+    config_get_string(key)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Read an entire file-typed resource (e.g. `eeprom_image`, `scenario`).
+/// `None` if the resource is absent.
+fn resource_get(key: &str) -> Option<Vec<u8>> {
+    let len = unsafe { resource_len(key.as_ptr() as i32, key.len() as i32) };
+    if len < 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; len as usize];
+    let n = unsafe {
+        resource_read(
+            key.as_ptr() as i32,
+            key.len() as i32,
+            0,
+            buf.as_mut_ptr() as i32,
+            buf.len() as i32,
+        )
+    };
+    if n < 0 {
+        return None;
+    }
+    buf.truncate(n as usize);
+    Some(buf)
+}
+
+fn board_config_from_host() -> BoardConfig {
+    let defaults = BoardConfig::default();
+    BoardConfig {
+        pcf8574_enabled: config_get_bool("pcf8574", defaults.pcf8574_enabled),
+        eeprom_enabled: config_get_bool("eeprom", defaults.eeprom_enabled),
+        eeprom_size: config_get_usize("eeprom_size", defaults.eeprom_size),
+        eeprom_image: resource_get("eeprom_image"),
+        lm75_enabled: config_get_bool("lm75", defaults.lm75_enabled),
+        ltc2990_enabled: config_get_bool("ltc2990", defaults.ltc2990_enabled),
+        pcf8583_enabled: config_get_bool("pcf8583", defaults.pcf8583_enabled),
+        fan_enabled: config_get_bool("fan", defaults.fan_enabled),
+        ..defaults
+    }
+}
+
+fn scenario_from_host() -> Scenario {
+    match resource_get("scenario") {
+        None => Scenario::empty(),
+        Some(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => match Scenario::parse(&text) {
+                Ok(scenario) => scenario,
+                Err(e) => {
+                    host_log(&format!("cpldicy: scenario parse error: {e}"));
+                    Scenario::empty()
+                }
+            },
+            Err(_) => {
+                host_log("cpldicy: scenario resource is not valid UTF-8");
+                Scenario::empty()
+            }
+        },
+    }
+}
+
+struct PluginState {
+    board: Board,
+    scenario: Scenario,
+}
+
+impl PluginState {
+    fn new() -> Self {
+        Self {
+            board: Board::with_config(board_config_from_host()),
+            scenario: scenario_from_host(),
+        }
+    }
+}
+
 thread_local! {
-    static BOARD: RefCell<Board> = RefCell::new(Board::new());
+    static STATE: RefCell<PluginState> = RefCell::new(PluginState::new());
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn init() {
+    // Accessing STATE for the first time is what actually constructs it
+    // (host config/resource calls happen inside `PluginState::new()`,
+    // triggered by this first `.with()`) -- see docs/zorro.md's ABI
+    // contract: `init` runs once after instantiation, before any
+    // transaction, so this is the right (and only) place that first
+    // access should happen.
+    STATE.with(|_| {});
     host_log("cpldicy: init");
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn read(off: i32, size: i32) -> i32 {
-    BOARD.with(|b| b.borrow_mut().read(off as u32, size as u32) as i32)
+    STATE.with(|s| s.borrow_mut().board.read(off as u32, size as u32) as i32)
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn write(off: i32, size: i32, value: i32) {
-    BOARD.with(|b| b.borrow_mut().write(off as u32, size as u32, value as u32));
+    STATE.with(|s| {
+        s.borrow_mut()
+            .board
+            .write(off as u32, size as u32, value as u32)
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn tick(cck: i32) {
-    BOARD.with(|b| b.borrow_mut().tick(cck as u32));
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        let PluginState { board, scenario } = &mut *s;
+        board.tick(cck as u32);
+        scenario.tick(cck as u32, board);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn int2() -> i32 {
-    BOARD.with(|b| i32::from(b.borrow().int2_asserted()))
+    STATE.with(|s| i32::from(s.borrow().board.int2_asserted()))
 }

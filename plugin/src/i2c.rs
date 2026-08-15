@@ -27,6 +27,14 @@ pub trait I2cDevice {
     /// STOP condition (or the device being deselected by a repeated
     /// START to a different address).
     fn stop(&mut self);
+
+    /// Advance any autonomous device-internal state (a virtual fan
+    /// spinning up, a clock ticking) by `cck` emulated cycles -- called
+    /// on every device regardless of whether it's currently addressed,
+    /// unlike the other four calls which only ever reach the active
+    /// device. Most devices are purely reactive and don't need this;
+    /// default no-op.
+    fn tick(&mut self, _cck: u32) {}
 }
 
 /// What [`Pcf8584`](crate::pcf8584::Pcf8584) drives. A thin trait boundary
@@ -48,6 +56,13 @@ pub trait I2cBus {
 pub struct I2cBusEngine {
     devices: Vec<(u8, Box<dyn I2cDevice>)>,
     active: Option<usize>,
+    /// Addresses fault-injected as "unplugged" (docs/PLAN.md section
+    /// 3.4): a START to one of these NAKs regardless of whether a real
+    /// device is attached there, standing in for a sensor that's failed
+    /// or come loose. A small `Vec` rather than a `HashSet` -- the
+    /// number of simultaneously faulted addresses in any realistic
+    /// scenario is tiny, and this keeps `no_std`-adjacent code simple.
+    unplugged: Vec<u8>,
 }
 
 impl I2cBusEngine {
@@ -55,11 +70,30 @@ impl I2cBusEngine {
         Self {
             devices: Vec::new(),
             active: None,
+            unplugged: Vec::new(),
         }
     }
 
     pub fn attach(&mut self, addr7: u8, device: Box<dyn I2cDevice>) {
         self.devices.push((addr7, device));
+    }
+
+    /// Advance every attached device's autonomous state, addressed or
+    /// not (a virtual fan spins up in the background regardless of
+    /// whether anyone's currently talking to its controller over I2C).
+    pub fn tick(&mut self, cck: u32) {
+        for (_, device) in &mut self.devices {
+            device.tick(cck);
+        }
+    }
+
+    /// Fault injection: mark (or clear) an address as "unplugged" --
+    /// see the `unplugged` field docs.
+    pub fn set_unplugged(&mut self, addr7: u8, unplugged: bool) {
+        self.unplugged.retain(|a| *a != addr7);
+        if unplugged {
+            self.unplugged.push(addr7);
+        }
     }
 }
 
@@ -71,6 +105,10 @@ impl Default for I2cBusEngine {
 
 impl I2cBus for I2cBusEngine {
     fn start(&mut self, addr7: u8, read: bool) -> bool {
+        if self.unplugged.contains(&addr7) {
+            self.active = None;
+            return false;
+        }
         self.active = self.devices.iter().position(|(a, _)| *a == addr7);
         match self.active {
             Some(i) => self.devices[i].1.start(read),
@@ -96,6 +134,40 @@ impl I2cBus for I2cBusEngine {
         if let Some(i) = self.active.take() {
             self.devices[i].1.stop();
         }
+    }
+}
+
+/// Wraps a device in `Rc<RefCell<T>>` so [`crate::board::Board`] can hold
+/// a typed handle for scenario scripting (docs/PLAN.md section 3.6 --
+/// "set the virtual temperature") while the *same* device instance is
+/// also registered on the bus for the real I2C protocol path. Without
+/// this, the bus's `Box<dyn I2cDevice>` registry and any scenario-facing
+/// handle would end up as two independent copies of device state instead
+/// of one shared source of truth. `Rc<RefCell<_>>` (not `Arc`/`Mutex`) is
+/// enough because a WASM plugin instance is single-threaded.
+pub struct SharedDevice<T>(pub std::rc::Rc<std::cell::RefCell<T>>);
+
+impl<T> Clone for SharedDevice<T> {
+    fn clone(&self) -> Self {
+        Self(std::rc::Rc::clone(&self.0))
+    }
+}
+
+impl<T: I2cDevice> I2cDevice for SharedDevice<T> {
+    fn start(&mut self, read: bool) -> bool {
+        self.0.borrow_mut().start(read)
+    }
+    fn write(&mut self, byte: u8) -> bool {
+        self.0.borrow_mut().write(byte)
+    }
+    fn read(&mut self, master_will_ack: bool) -> u8 {
+        self.0.borrow_mut().read(master_will_ack)
+    }
+    fn stop(&mut self) {
+        self.0.borrow_mut().stop()
+    }
+    fn tick(&mut self, cck: u32) {
+        self.0.borrow_mut().tick(cck)
     }
 }
 

@@ -20,3 +20,64 @@ product = 15          # 0x0F
 
 wasm = "../target/wasm32-unknown-unknown/release/cpldicy_plugin.wasm"
 int2 = true
+
+# Per-device enable/config (docs/PLAN.md section 3.7, docs/board-facts.md
+# section 5-6 for which devices are the real board's own authentic
+# residents vs. this project's teaching sample set). Defaults mirror
+# plugin/src/board.rs's BoardConfig::default() -- see that struct's doc
+# comment for the reasoning behind each default.
+[config]
+pcf8574 = "true"    # GPIO expander sample device; Phase 1's i2c.library gate depends on this
+eeprom = "false"     # 24Cxx EEPROM sample device
+eeprom_size = "4096" # bytes; 24C32-class
+# eeprom_image = ""  # optional: type=file resource, initial EEPROM contents
+lm75 = "false"       # simplest temperature-sensor sample device
+ltc2990 = "true"     # the real board's own authentic monitor chip
+pcf8583 = "false"    # RTC sample device
+fan = "true"         # the real board's own authentic MAX31760 fan controller
+# scenario = ""      # optional: type=file resource, deterministic event timeline (see plugin/src/scenario.rs)
+
+[[option]]
+key = "pcf8574"
+label = "PCF8574 GPIO expander"
+type = "bool"
+
+[[option]]
+key = "eeprom"
+label = "24Cxx EEPROM"
+type = "bool"
+
+[[option]]
+key = "eeprom_size"
+label = "EEPROM size (bytes)"
+type = "int"
+
+[[option]]
+key = "eeprom_image"
+label = "EEPROM initial contents"
+type = "file"
+
+[[option]]
+key = "lm75"
+label = "LM75 temperature sensor"
+type = "bool"
+
+[[option]]
+key = "ltc2990"
+label = "LTC2990 voltage/temperature monitor"
+type = "bool"
+
+[[option]]
+key = "pcf8583"
+label = "PCF8583 clock/calendar"
+type = "bool"
+
+[[option]]
+key = "fan"
+label = "MAX31760 fan controller"
+type = "bool"
+
+[[option]]
+key = "scenario"
+label = "Scenario script"
+type = "file"

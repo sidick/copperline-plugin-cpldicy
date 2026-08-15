@@ -19,32 +19,251 @@
 //!   So a byte access at an *odd* address (`/LDS`) never reaches the
 //!   chip at all -- it reads open bus and writes are dropped, regardless
 //!   of which register bit1 would otherwise select.
+//!
+//! Phase 2 adds the rest of the virtual bus (docs/PLAN.md section 3.4):
+//! PCF8574 and LTC2990 carry over from Phase 1/the real board; EEPROM,
+//! LM75, PCF8583, and the MAX31760 fan controller are newly wired here,
+//! each individually enable-able through [`BoardConfig`]. Scenario-
+//! controllable devices are held both as an [`crate::i2c::SharedDevice`]
+//! on the bus (for the real I2C protocol path) and as a typed
+//! `Rc<RefCell<_>>` handle directly on `Board` (for
+//! [`crate::scenario`]'s "set the virtual temperature" calls) --
+//! see `crate::i2c`'s module docs for why one instance needs two access
+//! paths instead of two independent copies of device state.
 
+use crate::devices::eeprom24::Eeprom24;
+use crate::devices::lm75::Lm75;
+use crate::devices::ltc2990::Ltc2990;
+use crate::devices::pcf8583::{DateTime, Pcf8583};
 use crate::devices::pcf8574::Pcf8574;
-use crate::i2c::I2cBusEngine;
+use crate::fan::{Max31760, MAX31760_ADDRESS};
+use crate::i2c::{I2cBusEngine, SharedDevice};
 use crate::pcf8584::Pcf8584;
-
-/// Standard PCF8574 default address (A0-A2 grounded). Not an authentic
-/// CPLDIcy resident -- it's the "blink an LED / read a button" sample
-/// device docs/PLAN.md section 3.4 calls for. Hardcoded for Phase 1;
-/// Phase 2's config surface makes this configurable/optional.
-const PCF8574_ADDRESS: u8 = 0x20;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// A read from an address the board doesn't drive: open bus.
 const OPEN_BUS_BYTE: u8 = 0xFF;
 
+/// Per-device enable/address configuration (docs/PLAN.md section 3.7's
+/// manifest `[config]` schema). PCF8574/LTC2990/the fan controller
+/// default on -- the GPIO expander because Phase 1's `i2c.library` gate
+/// depends on it being there out of the box, LTC2990/fan because they're
+/// the real board's own authentic residents (docs/board-facts.md §5-6).
+/// EEPROM/LM75/PCF8583 are opt-in teaching devices, off by default to
+/// keep an out-of-the-box bus scan uncluttered.
+pub struct BoardConfig {
+    pub pcf8574_enabled: bool,
+    pub pcf8574_address: u8,
+    pub eeprom_enabled: bool,
+    pub eeprom_address: u8,
+    pub eeprom_size: usize,
+    pub eeprom_image: Option<Vec<u8>>,
+    pub lm75_enabled: bool,
+    pub lm75_address: u8,
+    pub ltc2990_enabled: bool,
+    pub ltc2990_address: u8,
+    pub pcf8583_enabled: bool,
+    pub pcf8583_address: u8,
+    pub fan_enabled: bool,
+}
+
+impl Default for BoardConfig {
+    fn default() -> Self {
+        Self {
+            pcf8574_enabled: true,
+            pcf8574_address: 0x20,
+            eeprom_enabled: false,
+            eeprom_address: 0x54,
+            eeprom_size: 4096, // 24C32-class
+            eeprom_image: None,
+            lm75_enabled: false,
+            lm75_address: 0x48,
+            ltc2990_enabled: true,
+            ltc2990_address: 0x4C, // docs/board-facts.md §6
+            pcf8583_enabled: false,
+            pcf8583_address: 0x51,
+            fan_enabled: true,
+        }
+    }
+}
+
 pub struct Board {
     pcf: Pcf8584,
     bus: I2cBusEngine,
+    // Held to keep the Rc alive and reachable for future scenario hooks
+    // (a PCF8574 "button press" fault, an EEPROM dump-for-inspection
+    // call) -- not read directly yet, unlike the other typed handles
+    // below, which already have scenario-facing setters.
+    #[allow(dead_code)]
+    pcf8574: Option<Rc<RefCell<Pcf8574>>>,
+    #[allow(dead_code)]
+    eeprom: Option<Rc<RefCell<Eeprom24>>>,
+    lm75: Option<Rc<RefCell<Lm75>>>,
+    ltc2990: Option<Rc<RefCell<Ltc2990>>>,
+    pcf8583: Option<Rc<RefCell<Pcf8583>>>,
+    fan: Option<Rc<RefCell<Max31760>>>,
+    /// Name -> configured address, for enabled devices only -- lets
+    /// [`crate::scenario`] target a fault fixture ("unplug the sensor")
+    /// by the same device name a scenario script uses, without needing
+    /// to know raw I2C addresses.
+    device_addresses: Vec<(&'static str, u8)>,
+}
+
+/// Attaches a freshly built `Rc<RefCell<T>>` to the bus and returns the
+/// same handle, so callers can do `self.field = attach(&mut bus, addr,
+/// device)` and end up with one shared instance reachable both ways.
+fn attach<T: crate::i2c::I2cDevice + 'static>(
+    bus: &mut I2cBusEngine,
+    addr: u8,
+    device: T,
+) -> Rc<RefCell<T>> {
+    let shared = Rc::new(RefCell::new(device));
+    bus.attach(addr, Box::new(SharedDevice(Rc::clone(&shared))));
+    shared
 }
 
 impl Board {
     pub fn new() -> Self {
+        Self::with_config(BoardConfig::default())
+    }
+
+    pub fn with_config(config: BoardConfig) -> Self {
         let mut bus = I2cBusEngine::new();
-        bus.attach(PCF8574_ADDRESS, Box::new(Pcf8574::new()));
+
+        let pcf8574 = config
+            .pcf8574_enabled
+            .then(|| attach(&mut bus, config.pcf8574_address, Pcf8574::new()));
+
+        let eeprom = config.eeprom_enabled.then(|| {
+            let mut dev = Eeprom24::new(config.eeprom_size);
+            if let Some(image) = &config.eeprom_image {
+                dev.load_image(image);
+            }
+            attach(&mut bus, config.eeprom_address, dev)
+        });
+
+        let lm75 = config
+            .lm75_enabled
+            .then(|| attach(&mut bus, config.lm75_address, Lm75::new()));
+
+        let ltc2990 = config
+            .ltc2990_enabled
+            .then(|| attach(&mut bus, config.ltc2990_address, Ltc2990::new()));
+
+        let pcf8583 = config
+            .pcf8583_enabled
+            .then(|| attach(&mut bus, config.pcf8583_address, Pcf8583::new()));
+
+        let fan = config
+            .fan_enabled
+            .then(|| attach(&mut bus, MAX31760_ADDRESS, Max31760::new()));
+
+        let mut device_addresses = Vec::new();
+        if pcf8574.is_some() {
+            device_addresses.push(("pcf8574", config.pcf8574_address));
+        }
+        if eeprom.is_some() {
+            device_addresses.push(("eeprom", config.eeprom_address));
+        }
+        if lm75.is_some() {
+            device_addresses.push(("lm75", config.lm75_address));
+        }
+        if ltc2990.is_some() {
+            device_addresses.push(("ltc2990", config.ltc2990_address));
+        }
+        if pcf8583.is_some() {
+            device_addresses.push(("pcf8583", config.pcf8583_address));
+        }
+        if fan.is_some() {
+            device_addresses.push(("fan", MAX31760_ADDRESS));
+        }
+
         Self {
             pcf: Pcf8584::new(),
             bus,
+            pcf8574,
+            eeprom,
+            lm75,
+            ltc2990,
+            pcf8583,
+            fan,
+            device_addresses,
+        }
+    }
+
+    // -- Scenario-facing setters (docs/PLAN.md section 3.6). Each is a
+    // no-op if the corresponding device isn't enabled, matching a real
+    // scenario script targeting a board configuration that doesn't carry
+    // that device -- not a bug to report, just nothing to do.
+
+    pub fn set_ltc2990_tint(&self, celsius: f32) {
+        if let Some(dev) = &self.ltc2990 {
+            dev.borrow_mut().set_tint(celsius);
+        }
+    }
+    pub fn set_ltc2990_v1(&self, volts: f32) {
+        if let Some(dev) = &self.ltc2990 {
+            dev.borrow_mut().set_v1(volts);
+        }
+    }
+    pub fn set_ltc2990_v2(&self, volts: f32) {
+        if let Some(dev) = &self.ltc2990 {
+            dev.borrow_mut().set_v2(volts);
+        }
+    }
+    pub fn set_ltc2990_external_temp(&self, celsius: f32) {
+        if let Some(dev) = &self.ltc2990 {
+            dev.borrow_mut().set_external_temp(celsius);
+        }
+    }
+    pub fn set_ltc2990_vcc(&self, volts: f32) {
+        if let Some(dev) = &self.ltc2990 {
+            dev.borrow_mut().set_vcc(volts);
+        }
+    }
+    pub fn set_lm75_celsius(&self, celsius: f32) {
+        if let Some(dev) = &self.lm75 {
+            dev.borrow_mut().set_celsius(celsius);
+        }
+    }
+    pub fn set_pcf8583_time(&self, time: DateTime) {
+        if let Some(dev) = &self.pcf8583 {
+            dev.borrow_mut().set_time(time);
+        }
+    }
+    pub fn set_fan_stuck(&self, stuck: bool) {
+        if let Some(dev) = &self.fan {
+            dev.borrow_mut().fan_mut().set_stuck(stuck);
+        }
+    }
+    pub fn fan_duty(&self) -> Option<u8> {
+        self.fan.as_ref().map(|d| d.borrow().fan().duty())
+    }
+    pub fn fan_rpm(&self) -> Option<u32> {
+        self.fan.as_ref().map(|d| d.borrow().fan().rpm())
+    }
+
+    /// Fault knob: "device unplugged" -- the given address stops
+    /// acknowledging entirely (docs/PLAN.md section 3.4's "address NAK"
+    /// fixture), regardless of which device (if any) is actually
+    /// attached there.
+    pub fn set_address_unplugged(&mut self, addr: u8, unplugged: bool) {
+        self.bus.set_unplugged(addr, unplugged);
+    }
+
+    /// Same fault, targeted by device name instead of raw address (what
+    /// a [`crate::scenario`] script actually writes). Returns `false` if
+    /// no enabled device has that name -- a scenario targeting a device
+    /// this board configuration doesn't carry, which the caller may want
+    /// to log but shouldn't treat as fatal.
+    pub fn set_device_unplugged(&mut self, name: &str, unplugged: bool) -> bool {
+        match self.device_addresses.iter().find(|(n, _)| *n == name) {
+            Some((_, addr)) => {
+                self.bus.set_unplugged(*addr, unplugged);
+                true
+            }
+            None => false,
         }
     }
 
@@ -91,6 +310,7 @@ impl Board {
 
     pub fn tick(&mut self, cck: u32) {
         self.pcf.tick(cck, &mut self.bus);
+        self.bus.tick(cck);
     }
 
     pub fn int2_asserted(&self) -> bool {
@@ -118,6 +338,8 @@ mod tests {
     const STA: u32 = 0x04;
     const STO: u32 = 0x02;
     const ACK: u32 = 0x01;
+
+    const PCF8574_ADDRESS: u8 = 0x20;
 
     #[test]
     fn even_word_offset_0_reaches_the_a0_area_and_offset_2_reaches_s1() {
@@ -216,5 +438,47 @@ mod tests {
 
         board.write(2, 1, PIN | ESO | STO | ACK);
         assert!(!board.int2_asserted(), "STOP should deassert INT2");
+    }
+
+    #[test]
+    fn default_config_enables_pcf8574_ltc2990_and_fan_but_not_the_opt_in_devices() {
+        let board = Board::new();
+        assert!(board.pcf8574.is_some());
+        assert!(board.ltc2990.is_some());
+        assert!(board.fan.is_some());
+        assert!(board.eeprom.is_none());
+        assert!(board.lm75.is_none());
+        assert!(board.pcf8583.is_none());
+    }
+
+    #[test]
+    fn scenario_setters_are_a_no_op_when_the_device_is_disabled() {
+        let board = Board::with_config(BoardConfig {
+            ltc2990_enabled: false,
+            ..BoardConfig::default()
+        });
+        // Should not panic even though there's no LTC2990 to set.
+        board.set_ltc2990_tint(50.0);
+    }
+
+    #[test]
+    fn unplugged_fault_makes_a_configured_device_stop_acking() {
+        let mut board = Board::new();
+        board.write(2, 1, PIN | ESO | ACK);
+
+        board.set_address_unplugged(PCF8574_ADDRESS, true);
+        board.write(0, 1, u32::from(PCF8574_ADDRESS) << 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        let status = board.read(2, 1);
+        assert_ne!(status & 0x08, 0, "unplugged device should NAK its address");
+
+        board.write(2, 1, PIN | ESO | STO | ACK);
+        board.set_address_unplugged(PCF8574_ADDRESS, false);
+        board.write(0, 1, u32::from(PCF8574_ADDRESS) << 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        let status = board.read(2, 1);
+        assert_eq!(status & 0x08, 0, "re-plugging should restore the ACK");
     }
 }
