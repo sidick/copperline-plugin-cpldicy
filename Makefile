@@ -11,6 +11,9 @@ test:
 conformance: all
 	cd tests/copperline && ./run.sh
 
+thermal-probe: all
+	cd tests/copperline && ./run-thermal.sh
+
 fetch-oracle:
 	./vendor/fetch-oracle.sh
 
@@ -20,4 +23,4 @@ oracle: all fetch-oracle
 clean:
 	cargo clean
 
-.PHONY: all test conformance fetch-oracle oracle clean
+.PHONY: all test conformance thermal-probe fetch-oracle oracle clean

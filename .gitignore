@@ -1,6 +1,8 @@
 /target/
 /tests/copperline/icy_probe
 /tests/copperline/minimal-boot.adf
+/tests/copperline/thermal_probe
+/tests/copperline/thermal-boot.adf
 /tests/copperline/oracle-boot.adf
 /tests/copperline/oracle-out/*.log
 /nondistributable/

@@ -1,0 +1,9 @@
+# Scenario for thermal_probe.c / run-thermal.sh (issue #8): the same
+# temperature values plugin/tests/flagship.rs's
+# closed_thermal_loop_scripted_temperature_drives_fan_response test uses
+# host-side, now driving a real m68k guest instead -- but not the same
+# cck timestamp for the ramp: that host-side test has no AmigaOS boot
+# overhead to outlast, a real guest does. See thermal_probe.c's own
+# header timing note for how 100,000,000 was arrived at empirically.
+0 set ltc2990.tint 25.0
+100000000 set ltc2990.tint 60.0

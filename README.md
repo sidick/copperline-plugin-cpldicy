@@ -174,6 +174,19 @@ Three tiers, per `PLAN.md` section 4:
    m68k probe pokes the board window directly under real Copperline
    AutoConfig/bus timing: AutoConfig discovery, register reset defaults,
    register round-trip, and a full I2C master-tx/master-rx transaction.
+   `make thermal-probe` extends this tier (issue #8): a second
+   freestanding probe (`tests/copperline/thermal_probe.c`) acts as its
+   own guest driver against a scripted `thermal-scenario.txt` — the same
+   closed-thermal-loop scenario `flagship.rs` exercises host-side (read
+   the LTC2990's Tint, apply a simple fan curve, drive the MAX31760,
+   confirm the virtual fan's tach registers respond), but through real
+   AutoConfig/bus timing instead of Rust acting as its own guest. No
+   dos.library/libgcc available freestanding, so it waits for scripted
+   events by polling bounded loops rather than a fixed delay, and does
+   all temperature math in fixed-point integers with hand-rolled
+   multiply/divide rather than float (see that file's own header for
+   why, including the empirically-measured cck cost of plain AmigaOS
+   boot that its scenario timestamp and poll budgets are tuned against).
 3. **Guest oracle pass** — `make oracle`. Fetches (`make fetch-oracle`)
    and boots *unmodified* third-party AmigaOS software against the
    board — no code in this repo touches the guest side. See below.

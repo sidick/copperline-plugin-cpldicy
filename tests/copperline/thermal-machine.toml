@@ -1,0 +1,27 @@
+# Copperline machine profile for the real-guest thermal-loop probe
+# (docs/PLAN.md section 4 tier 2 extension, issue #8): same shape as
+# machine.toml, plus a `scenario` config resource so the board plays
+# back thermal-scenario.txt while thermal_probe.c drives it.
+
+[cpu]
+model = "68000"
+
+[memory]
+chip = "512K"
+slow = "512K"
+
+[floppy]
+drives = 1
+speed = 0 # turbo: instant floppy DMA, no realistic seek/rotation delay
+
+[floppy.df0]
+path = "thermal-boot.adf" # built fresh by run-thermal.sh via xdftool
+write_protected = true
+
+[[zorro]]
+metadata = "../../manifest/cpldicy.toml"
+config = { scenario = "thermal-scenario.txt" }
+
+[emulation]
+power_on = true
+warp_speed = "max"
