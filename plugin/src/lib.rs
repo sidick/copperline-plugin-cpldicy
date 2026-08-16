@@ -187,6 +187,8 @@ fn board_config_from_host() -> BoardConfig {
         ds1629_time: rtc_time_from_host("ds1629_time"),
         r2025_enabled: config_get_bool("r2025", defaults.r2025_enabled),
         r2025_time: rtc_time_from_host("r2025_time"),
+        lcd_enabled: config_get_bool("lcd", defaults.lcd_enabled),
+        lcd_columns: config_get_usize("lcd_columns", defaults.lcd_columns),
         fan_enabled: config_get_bool("fan", defaults.fan_enabled),
         ..defaults
     }
@@ -266,6 +268,14 @@ pub extern "C" fn tick(cck: i32) {
         let PluginState { board, scenario } = &mut *s;
         board.tick(cck as u32);
         scenario.tick(cck as u32, board);
+        // The LCD's only "export" path (no host framebuffer/display
+        // import exists to render it anywhere else -- see the graphical
+        // OLED follow-up issue this same gap forced). `lcd_text_if_changed`
+        // already does its own diffing, so this only logs when the
+        // visible content actually changed, not every tick.
+        if let Some([row0, row1]) = board.lcd_text_if_changed() {
+            host_log(&format!("cpldicy: lcd: {row0:?} / {row1:?}"));
+        }
     });
 }
 

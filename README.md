@@ -6,7 +6,8 @@ I2C card — a PCF8584-based Zorro II board, software-compatible with M.
 Boehmer's original ICY board — plus its authentic LTC2990 voltage/
 temperature monitor and Fanny-compatible MAX31760 fan controller, and a
 scriptable virtual I2C bus of teaching-sample peripherals (GPIO
-expander, EEPROM, LM75 sensor, PCF8583 clock).
+expander, EEPROM, LM75 sensor, four `SetClockI2C`-supported RTCs —
+PCF8583/DS1307/DS1629/R2025 — and an HD44780 character LCD).
 
 Also intended as a worked reference for Copperline's WASM Zorro plugin
 mechanism generally — see `docs/tutorial.md` for a from-scratch,
@@ -68,9 +69,9 @@ identical configuration, so you can also switch between them later.
 4. The board appears with a header row (its declared name, "CPLDIcy
    I2C") and one row per config option below it — toggle buttons for the
    `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`ds1307`/`ds1629`/`r2025`/
-   `fan` bools, a stepper for `eeprom_size`, and **Browse**/**Clear**
-   buttons for the `file`-typed `eeprom_image`/`scenario` options (see
-   the table below for what each does).
+   `lcd`/`fan` bools, a stepper for `eeprom_size`/`lcd_columns`, and
+   **Browse**/**Clear** buttons for the `file`-typed `eeprom_image`/
+   `scenario` options (see the table below for what each does).
 5. Click **Run** to boot with the board fitted, or use the **Save As**/
    **Save default** actions at the bottom of the screen to persist this
    configuration to a `.toml` file (or as Copperline's own default) for
@@ -109,6 +110,8 @@ entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 | `ds1629_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
 | `r2025` | `false` | RTC sample device (fixed address 0x32) |
 | `r2025_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
+| `lcd` | `false` | HD44780 character LCD sample device, PCF8574 I2C backpack (address 0x27) |
+| `lcd_columns` | `16` | visible characters per row (16x2 is the common physical size) |
 | `fan` | `true` | the real board's own authentic MAX31760 fan controller (address 0x50) |
 | `scenario` | — | `type=file`: deterministic event timeline, see `plugin/src/scenario.rs` |
 
@@ -117,6 +120,14 @@ machine running Copperline -- the plugin ABI has no host-time import to
 read it from (see [issue #10](https://github.com/sidick/copperline-plugin-cpldicy/issues/10)).
 Leave a `_time` option unset and the corresponding RTC starts at a fixed
 epoch instead.
+
+The LCD's visible text is exported by logging it (`wasm[cpldicy]: lcd:
+"row0" / "row1"` in Copperline's own log) whenever it changes -- the
+plugin ABI has no display output of its own to render it into, so this
+is as far as a *character* display's output can travel today. A
+graphical I2C display (an SSD1306 OLED, say) would need an actual host
+rendering capability to be worth adding at all; see
+[issue #11](https://github.com/sidick/copperline-plugin-cpldicy/issues/11).
 
 ### Scenario format
 
@@ -160,7 +171,7 @@ in this repository patches or special-cases any of it:
 |---|---|
 | `i2c.library` v40 ("bcu"/PCF8584 driver, Wilhelm Noeker/Brian Ipsen) | Detects the board via AutoConfig (manufacturer 5001, product 15) |
 | `I2CScan` (Aminet `docs/hard/i2clib40`) | Full bus scan finds all three default devices, each confirmed via a real address+W *and* address+R (1-byte master-receive, exercising the dummy-read pipeline) transaction: `0x40/0x41` (PCF8574), `0x98/0x99` (LTC2990), `0xa0/0xa1` (MAX31760) |
-| `FannyCtl` (Henryk Richter, `i2csensors` repo) | Reads the MAX31760's full register/LUT state at its documented default address (0xA0) without error |
+| `FannyCtl` (Henryk Richter, [`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master) repo) | Reads the MAX31760's full register/LUT state at its documented default address (0xA0) without error |
 | `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels |
 | `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, both `Devs:Sensors/*.cfg` config files parsed successfully |
 
@@ -174,7 +185,11 @@ either `m68k-amigaos-gcc` on `PATH` or Docker for the tier-2 probe build
 — see `tests/copperline/run.sh`/`run-oracle.sh` headers for exact
 prereqs). The fetched binaries land in `nondistributable/` (git-ignored,
 never committed — see `vendor/fetch-oracle.sh` for provenance/licensing
-notes on each).
+notes on each). All of `FannyCtl`/`i2csensors.library`/`simplesensors`/
+`diagnostics` above come from Henryk Richter's
+[`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master)
+repo — useful general-purpose Amiga I2C tooling beyond just this
+board's own oracle pass.
 
 ## License
 

@@ -34,6 +34,7 @@
 use crate::devices::ds1307::{self, Ds1307, DS1307_ADDRESS};
 use crate::devices::ds1629::{self, Ds1629, DS1629_ADDRESS};
 use crate::devices::eeprom24::Eeprom24;
+use crate::devices::hd44780_pcf8574::{Hd44780Pcf8574, HD44780_PCF8574_DEFAULT_ADDRESS};
 use crate::devices::lm75::Lm75;
 use crate::devices::ltc2990::Ltc2990;
 use crate::devices::pcf8583::{DateTime, Pcf8583};
@@ -54,8 +55,9 @@ const OPEN_BUS_BYTE: u8 = 0xFF;
 /// default on -- the GPIO expander because Phase 1's `i2c.library` gate
 /// depends on it being there out of the box, LTC2990/fan because they're
 /// the real board's own authentic residents (docs/board-facts.md §5-6).
-/// EEPROM/LM75/PCF8583/DS1307/DS1629/R2025 are opt-in teaching devices,
-/// off by default to keep an out-of-the-box bus scan uncluttered.
+/// EEPROM/LM75/PCF8583/DS1307/DS1629/R2025/the LCD are opt-in teaching
+/// devices, off by default to keep an out-of-the-box bus scan
+/// uncluttered.
 pub struct BoardConfig {
     pub pcf8574_enabled: bool,
     pub pcf8574_address: u8,
@@ -76,6 +78,9 @@ pub struct BoardConfig {
     pub ds1629_time: Option<WallClock>,
     pub r2025_enabled: bool,
     pub r2025_time: Option<WallClock>,
+    pub lcd_enabled: bool,
+    pub lcd_address: u8,
+    pub lcd_columns: usize,
     pub fan_enabled: bool,
 }
 
@@ -101,6 +106,9 @@ impl Default for BoardConfig {
             ds1629_time: None,
             r2025_enabled: false,
             r2025_time: None,
+            lcd_enabled: false,
+            lcd_address: HD44780_PCF8574_DEFAULT_ADDRESS,
+            lcd_columns: 16, // 16x2 is the common physical size
             fan_enabled: true,
         }
     }
@@ -123,12 +131,19 @@ pub struct Board {
     ds1307: Option<Rc<RefCell<Ds1307>>>,
     ds1629: Option<Rc<RefCell<Ds1629>>>,
     r2025: Option<Rc<RefCell<R2025>>>,
+    lcd: Option<Rc<RefCell<Hd44780Pcf8574>>>,
     fan: Option<Rc<RefCell<Max31760>>>,
     /// Name -> configured address, for enabled devices only -- lets
     /// [`crate::scenario`] target a fault fixture ("unplug the sensor")
     /// by the same device name a scenario script uses, without needing
     /// to know raw I2C addresses.
     device_addresses: Vec<(&'static str, u8)>,
+    lcd_columns: usize,
+    /// What [`Board::lcd_text_if_changed`] last returned, so it can
+    /// report only when the LCD's visible content actually changes --
+    /// see that method's own docs for why this lives here instead of
+    /// lib.rs, which is the only module allowed to call `host_log`.
+    lcd_last_lines: Option<[String; 2]>,
 }
 
 /// Attaches a freshly built `Rc<RefCell<T>>` to the bus and returns the
@@ -256,6 +271,10 @@ impl Board {
             attach(&mut bus, R2025_ADDRESS, dev)
         });
 
+        let lcd = config
+            .lcd_enabled
+            .then(|| attach(&mut bus, config.lcd_address, Hd44780Pcf8574::new()));
+
         let fan = config
             .fan_enabled
             .then(|| attach(&mut bus, MAX31760_ADDRESS, Max31760::new()));
@@ -285,6 +304,9 @@ impl Board {
         if r2025.is_some() {
             device_addresses.push(("r2025", R2025_ADDRESS));
         }
+        if lcd.is_some() {
+            device_addresses.push(("lcd", config.lcd_address));
+        }
         if fan.is_some() {
             device_addresses.push(("fan", MAX31760_ADDRESS));
         }
@@ -300,8 +322,11 @@ impl Board {
             ds1307,
             ds1629,
             r2025,
+            lcd,
             fan,
             device_addresses,
+            lcd_columns: config.lcd_columns,
+            lcd_last_lines: None,
         }
     }
 
@@ -370,6 +395,27 @@ impl Board {
     }
     pub fn fan_rpm(&self) -> Option<u32> {
         self.fan.as_ref().map(|d| d.borrow().fan().rpm())
+    }
+
+    /// The LCD's current visible text, if it's enabled and its content
+    /// has changed since the last call -- `None` both when there's no
+    /// LCD and when there is one but nothing changed, so a caller can
+    /// unconditionally call this every tick without distinguishing the
+    /// two "nothing to report" cases.
+    ///
+    /// This is the "export" side of the LCD: `board.rs` stays host-ABI-
+    /// agnostic (only `lib.rs` may call `host_log`, per this crate's
+    /// top-level docs), so this method just computes and diffs the
+    /// text; `lib.rs`'s `tick` export is what actually logs it.
+    pub fn lcd_text_if_changed(&mut self) -> Option<[String; 2]> {
+        let dev = self.lcd.as_ref()?.borrow();
+        let lines = [dev.line(0, self.lcd_columns), dev.line(1, self.lcd_columns)];
+        if self.lcd_last_lines.as_ref() == Some(&lines) {
+            return None;
+        }
+        drop(dev);
+        self.lcd_last_lines = Some(lines.clone());
+        Some(lines)
     }
 
     /// Fault knob: "device unplugged" -- the given address stops
@@ -631,6 +677,48 @@ mod tests {
         assert!(board.ds1307.is_none());
         assert!(board.ds1629.is_none());
         assert!(board.r2025.is_none());
+        assert!(board.lcd.is_none());
+    }
+
+    #[test]
+    fn lcd_text_if_changed_reports_only_on_change_and_none_when_disabled() {
+        let mut disabled = Board::new();
+        assert_eq!(disabled.lcd_text_if_changed(), None);
+
+        let mut board = Board::with_config(BoardConfig {
+            lcd_enabled: true,
+            ..BoardConfig::default()
+        });
+        let lcd_address = HD44780_PCF8574_DEFAULT_ADDRESS;
+
+        // First call always reports (blank -> blank is still a change
+        // from "no report yet").
+        assert_eq!(board.lcd_text_if_changed(), Some([" ".repeat(16), " ".repeat(16)]));
+        // Nothing changed since: no report.
+        assert_eq!(board.lcd_text_if_changed(), None);
+
+        // Drive "Hi" onto the display over the bus, the same way a real
+        // guest driver would: select S0, address+W the LCD, then send
+        // RS=1/EN-pulsed nibbles for 'H' and 'i'.
+        board.write(2, 1, PIN | ESO | ACK);
+        board.write(0, 1, u32::from(lcd_address) << 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        for &ch in b"Hi" {
+            for nibble in [ch >> 4, ch & 0x0F] {
+                let base = 0x01 | (u32::from(nibble) << 4) | 0x08; // RS=1, backlight=1
+                board.write(0, 1, base | 0x04); // EN=1
+                board.tick(CCK_PER_BYTE_PHASE);
+                board.write(0, 1, base); // EN=0 -- falling edge latches the nibble
+                board.tick(CCK_PER_BYTE_PHASE);
+            }
+        }
+        board.write(2, 1, PIN | ESO | STO | ACK);
+
+        let mut expected_row0 = "Hi".to_string();
+        expected_row0.push_str(&" ".repeat(14));
+        assert_eq!(board.lcd_text_if_changed(), Some([expected_row0, " ".repeat(16)]));
+        assert_eq!(board.lcd_text_if_changed(), None, "unchanged since the last report");
     }
 
     #[test]
