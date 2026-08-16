@@ -31,6 +31,9 @@
 //! see `crate::i2c`'s module docs for why one instance needs two access
 //! paths instead of two independent copies of device state.
 
+use crate::devices::am2320::{Am2320, AM2320_ADDRESS};
+use crate::devices::bme680::{Bme680, BME680_ADDRESS};
+use crate::devices::bmp280::{Bmp280, BMP280_ADDRESS};
 use crate::devices::ds1307::{self, Ds1307, DS1307_ADDRESS};
 use crate::devices::ds1629::{self, Ds1629, DS1629_ADDRESS};
 use crate::devices::eeprom24::Eeprom24;
@@ -55,9 +58,9 @@ const OPEN_BUS_BYTE: u8 = 0xFF;
 /// default on -- the GPIO expander because Phase 1's `i2c.library` gate
 /// depends on it being there out of the box, LTC2990/fan because they're
 /// the real board's own authentic residents (docs/board-facts.md §5-6).
-/// EEPROM/LM75/PCF8583/DS1307/DS1629/R2025/the LCD are opt-in teaching
-/// devices, off by default to keep an out-of-the-box bus scan
-/// uncluttered.
+/// EEPROM/LM75/PCF8583/DS1307/DS1629/R2025/the LCD/BMP280/BME680/AM2320
+/// are opt-in teaching devices, off by default to keep an out-of-the-box
+/// bus scan uncluttered.
 pub struct BoardConfig {
     pub pcf8574_enabled: bool,
     pub pcf8574_address: u8,
@@ -81,7 +84,11 @@ pub struct BoardConfig {
     pub lcd_enabled: bool,
     pub lcd_address: u8,
     pub lcd_columns: usize,
+    pub bmp280_enabled: bool,
+    pub bme680_enabled: bool,
+    pub am2320_enabled: bool,
     pub fan_enabled: bool,
+    pub fan_address: u8,
 }
 
 impl Default for BoardConfig {
@@ -96,6 +103,13 @@ impl Default for BoardConfig {
             lm75_enabled: false,
             lm75_address: 0x48,
             ltc2990_enabled: true,
+            // 0x4C (0x98 8-bit): the ICYv2/CPLDIcy/Matze A3000DB wiring,
+            // matching this board. Henryk Richter's `i2csensors` repo
+            // (https://gitlab.com/HenrykRichter/i2csensors) documents two
+            // other real boards wiring the same chip at different
+            // addresses -- 0x9A (Fanny Card) and 0x9E (BFG9060/ClockIIC)
+            // -- reachable via the `ltc2990_address` config option if you
+            // want to simulate one of those instead.
             ltc2990_address: 0x4C, // docs/board-facts.md §6
             pcf8583_enabled: false,
             // 0x50 (0xA0/0xA1 8-bit), not 0x51: this is the only address
@@ -104,7 +118,11 @@ impl Default for BoardConfig {
             // PCF8583 at (i2cclass_rtc.c's I2C_PHILIPSA0) -- matching it
             // is what makes this device oracle-testable against real,
             // unmodified guest software rather than just this crate's
-            // own tests.
+            // own tests. Note this is the same address `fan_address`
+            // defaults to (see that field): a real board can't populate
+            // both a MAX31760 and a PCF8583-at-A0 at once either, so
+            // enabling both here needs one of them moved via its
+            // `_address` config option first.
             pcf8583_address: 0x50,
             pcf8583_time: None,
             ds1307_enabled: false,
@@ -116,7 +134,16 @@ impl Default for BoardConfig {
             lcd_enabled: false,
             lcd_address: HD44780_PCF8574_DEFAULT_ADDRESS,
             lcd_columns: 16, // 16x2 is the common physical size
+            bmp280_enabled: false,
+            bme680_enabled: false,
+            am2320_enabled: false,
             fan_enabled: true,
+            // 0x50 (0xA0 8-bit): the Fanny/CPLDIcy wiring, matching this
+            // board. `i2csensors` also documents 0xA2 (an alternate Fanny
+            // strapping) -- reachable via `fan_address` if you want to
+            // simulate that instead, or to resolve a collision with
+            // `pcf8583_address` (see that field's own doc comment).
+            fan_address: MAX31760_ADDRESS,
         }
     }
 }
@@ -139,6 +166,9 @@ pub struct Board {
     ds1629: Option<Rc<RefCell<Ds1629>>>,
     r2025: Option<Rc<RefCell<R2025>>>,
     lcd: Option<Rc<RefCell<Hd44780Pcf8574>>>,
+    bmp280: Option<Rc<RefCell<Bmp280>>>,
+    bme680: Option<Rc<RefCell<Bme680>>>,
+    am2320: Option<Rc<RefCell<Am2320>>>,
     fan: Option<Rc<RefCell<Max31760>>>,
     /// Name -> configured address, for enabled devices only -- lets
     /// [`crate::scenario`] target a fault fixture ("unplug the sensor")
@@ -282,9 +312,21 @@ impl Board {
             .lcd_enabled
             .then(|| attach(&mut bus, config.lcd_address, Hd44780Pcf8574::new()));
 
+        let bmp280 = config
+            .bmp280_enabled
+            .then(|| attach(&mut bus, BMP280_ADDRESS, Bmp280::new()));
+
+        let bme680 = config
+            .bme680_enabled
+            .then(|| attach(&mut bus, BME680_ADDRESS, Bme680::new()));
+
+        let am2320 = config
+            .am2320_enabled
+            .then(|| attach(&mut bus, AM2320_ADDRESS, Am2320::new()));
+
         let fan = config
             .fan_enabled
-            .then(|| attach(&mut bus, MAX31760_ADDRESS, Max31760::new()));
+            .then(|| attach(&mut bus, config.fan_address, Max31760::new()));
 
         let mut device_addresses = Vec::new();
         if pcf8574.is_some() {
@@ -314,8 +356,17 @@ impl Board {
         if lcd.is_some() {
             device_addresses.push(("lcd", config.lcd_address));
         }
+        if bmp280.is_some() {
+            device_addresses.push(("bmp280", BMP280_ADDRESS));
+        }
+        if bme680.is_some() {
+            device_addresses.push(("bme680", BME680_ADDRESS));
+        }
+        if am2320.is_some() {
+            device_addresses.push(("am2320", AM2320_ADDRESS));
+        }
         if fan.is_some() {
-            device_addresses.push(("fan", MAX31760_ADDRESS));
+            device_addresses.push(("fan", config.fan_address));
         }
 
         Self {
@@ -330,6 +381,9 @@ impl Board {
             ds1629,
             r2025,
             lcd,
+            bmp280,
+            bme680,
+            am2320,
             fan,
             device_addresses,
             lcd_columns: config.lcd_columns,
@@ -390,6 +444,41 @@ impl Board {
     pub fn set_r2025_time(&self, time: r2025::DateTime) {
         if let Some(dev) = &self.r2025 {
             dev.borrow_mut().set_time(time);
+        }
+    }
+    pub fn set_bmp280_celsius(&self, celsius: f32) {
+        if let Some(dev) = &self.bmp280 {
+            dev.borrow_mut().set_celsius(celsius);
+        }
+    }
+    pub fn set_bmp280_pressure_hpa(&self, hpa: f32) {
+        if let Some(dev) = &self.bmp280 {
+            dev.borrow_mut().set_pressure_hpa(hpa);
+        }
+    }
+    pub fn set_bme680_celsius(&self, celsius: f32) {
+        if let Some(dev) = &self.bme680 {
+            dev.borrow_mut().set_celsius(celsius);
+        }
+    }
+    pub fn set_bme680_pressure_hpa(&self, hpa: f32) {
+        if let Some(dev) = &self.bme680 {
+            dev.borrow_mut().set_pressure_hpa(hpa);
+        }
+    }
+    pub fn set_bme680_humidity_percent(&self, percent: f32) {
+        if let Some(dev) = &self.bme680 {
+            dev.borrow_mut().set_humidity_percent(percent);
+        }
+    }
+    pub fn set_am2320_celsius(&self, celsius: f32) {
+        if let Some(dev) = &self.am2320 {
+            dev.borrow_mut().set_celsius(celsius);
+        }
+    }
+    pub fn set_am2320_humidity_percent(&self, percent: f32) {
+        if let Some(dev) = &self.am2320 {
+            dev.borrow_mut().set_humidity_percent(percent);
         }
     }
     pub fn set_fan_stuck(&self, stuck: bool) {
@@ -574,6 +663,39 @@ mod tests {
     }
 
     #[test]
+    fn ltc2990_and_fan_addresses_are_configurable() {
+        let board = Board::with_config(BoardConfig {
+            ltc2990_address: 0x4D, // Fanny Card wiring (0x9A 8-bit)
+            fan_address: 0x51,     // alternate Fanny strapping (0xA2 8-bit)
+            ..BoardConfig::default()
+        });
+        assert!(board.device_addresses.contains(&("ltc2990", 0x4D)));
+        assert!(board.device_addresses.contains(&("fan", 0x51)));
+    }
+
+    #[test]
+    fn moving_pcf8583_off_fans_default_address_lets_both_coexist() {
+        // pcf8583_address defaults to the same address as fan_address
+        // (module docs on both fields) -- a real board could never
+        // populate both there at once either, so this is the escape
+        // hatch, not a bug to route around silently.
+        let mut board = Board::with_config(BoardConfig {
+            pcf8583_enabled: true,
+            pcf8583_address: 0x51, // moved off fan's default (0x50)
+            ..BoardConfig::default()
+        });
+
+        // The fan is still reachable at its own (default) address.
+        board.write(2, 1, PIN | ESO | ACK);
+        board.write(0, 1, u32::from(MAX31760_ADDRESS) << 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        let status = board.read(2, 1);
+        assert_eq!(status & 0x08, 0, "MAX31760 should ACK its own address once pcf8583 has moved off it");
+        board.write(2, 1, PIN | ESO | STO | ACK);
+    }
+
+    #[test]
     fn even_word_offset_0_reaches_the_a0_area_and_offset_2_reaches_s1() {
         let mut board = Board::new();
 
@@ -685,6 +807,9 @@ mod tests {
         assert!(board.ds1629.is_none());
         assert!(board.r2025.is_none());
         assert!(board.lcd.is_none());
+        assert!(board.bmp280.is_none());
+        assert!(board.bme680.is_none());
+        assert!(board.am2320.is_none());
     }
 
     #[test]

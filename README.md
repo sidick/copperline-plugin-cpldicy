@@ -6,8 +6,9 @@ I2C card — a PCF8584-based Zorro II board, software-compatible with M.
 Boehmer's original ICY board — plus its authentic LTC2990 voltage/
 temperature monitor and Fanny-compatible MAX31760 fan controller, and a
 scriptable virtual I2C bus of teaching-sample peripherals (GPIO
-expander, EEPROM, LM75 sensor, four `SetClockI2C`-supported RTCs —
-PCF8583/DS1307/DS1629/R2025 — and an HD44780 character LCD).
+expander, EEPROM, four `SetClockI2C`-supported RTCs —
+PCF8583/DS1307/DS1629/R2025 — an HD44780 character LCD, and the LM75/
+BMP280/BME680/AM2320 environmental sensors).
 
 Also intended as a worked reference for Copperline's WASM Zorro plugin
 mechanism generally — see `docs/tutorial.md` for a from-scratch,
@@ -69,9 +70,11 @@ identical configuration, so you can also switch between them later.
 4. The board appears with a header row (its declared name, "CPLDIcy
    I2C") and one row per config option below it — toggle buttons for the
    `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`ds1307`/`ds1629`/`r2025`/
-   `lcd`/`fan` bools, a stepper for `eeprom_size`/`lcd_columns`, and
-   **Browse**/**Clear** buttons for the `file`-typed `eeprom_image`/
-   `scenario` options (see the table below for what each does).
+   `lcd`/`bmp280`/`bme680`/`am2320`/`fan` bools, a stepper for
+   `eeprom_size`/`lcd_columns`, a text field for `ltc2990_address`/
+   `pcf8583_address`/`fan_address`, and **Browse**/**Clear** buttons for
+   the `file`-typed `eeprom_image`/`scenario` options (see the table
+   below for what each does).
 5. Click **Run** to boot with the board fitted, or use the **Save As**/
    **Save default** actions at the bottom of the screen to persist this
    configuration to a `.toml` file (or as Copperline's own default) for
@@ -102,7 +105,9 @@ entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 | `eeprom_image` | — | `type=file`: initial EEPROM contents |
 | `lm75` | `false` | LM75 temperature sensor sample device (address 0x48) |
 | `ltc2990` | `true` | the real board's own authentic monitor chip (address 0x4C) |
+| `ltc2990_address` | `0x4C` | 7-bit hex; `0x4C`=ICYv2/CPLDIcy/A3000DB, `0x4D`=Fanny Card, `0x4F`=BFG9060/ClockIIC |
 | `pcf8583` | `false` | RTC sample device (address 0x50) |
+| `pcf8583_address` | `0x50` | 7-bit hex — shares `fan_address`'s default; move one to enable both |
 | `pcf8583_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
 | `ds1307` | `false` | RTC sample device (fixed address 0x68) |
 | `ds1307_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
@@ -112,8 +117,19 @@ entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 | `r2025_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
 | `lcd` | `false` | HD44780 character LCD sample device, PCF8574 I2C backpack (address 0x27) |
 | `lcd_columns` | `16` | visible characters per row (16x2 is the common physical size) |
+| `bmp280` | `false` | Bosch temperature/pressure sample device (address 0x76) |
+| `bme680` | `false` | Bosch temperature/pressure/humidity sample device (address 0x77) |
+| `am2320` | `false` | Aosong temperature/humidity sample device (address 0x5C) |
 | `fan` | `true` | the real board's own authentic MAX31760 fan controller (address 0x50) |
+| `fan_address` | `0x50` | 7-bit hex; `0x50`=Fanny/CPLDIcy, `0x51`=alternate Fanny strapping |
 | `scenario` | — | `type=file`: deterministic event timeline, see `plugin/src/scenario.rs` |
+
+`ltc2990_address`/`pcf8583_address`/`fan_address` accept either a 7-bit
+hex address (`"0x4D"`) or plain decimal. `pcf8583_address` and
+`fan_address` share the same default (0x50) — a real board could never
+populate both a MAX31760 and a PCF8583 strapped to A0 at once either, so
+enabling both here needs moving one of them first (this is exactly the
+conflict the "Oracle compatibility" section below ran into).
 
 The four `_time` options don't default to the wall-clock time of the
 machine running Copperline -- the plugin ABI has no host-time import to
@@ -172,9 +188,9 @@ in this repository patches or special-cases any of it:
 | `i2c.library` v40 ("bcu"/PCF8584 driver, Wilhelm Noeker/Brian Ipsen) | Detects the board via AutoConfig (manufacturer 5001, product 15) |
 | `I2CScan` (Aminet `docs/hard/i2clib40`) | Full bus scan finds all three default devices, each confirmed via a real address+W *and* address+R (1-byte master-receive, exercising the dummy-read pipeline) transaction: `0x40/0x41` (PCF8574), `0x98/0x99` (LTC2990), `0xa0/0xa1` (MAX31760) |
 | `FannyCtl` (Henryk Richter, [`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master) repo) | Reads the MAX31760's full register/LUT state at its documented default address (0xA0) without error |
-| `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels, and (via `examples/Sensors/LM75.cfg`, this project's own since no official one exists upstream) reads the LM75's temperature channel matching its configured value (25.0000°C default) |
-| `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, all three `Devs:Sensors/*.cfg` config files parsed successfully |
-| `I2Clock` (Henryk Richter, `i2csensors` repo) | `SCAN` identifies all four RTCs by vendor/chip name at their real addresses (`0x9E`/DS1629, `0xA0`/PCF8583, `0xD0`/DS1307, `0x64`/R2025); `SAVE` then `SHOW` per chip proves the bus-write path, not just reads — it stores the guest's live system time on the chip and reads it straight back |
+| `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels, and reads BMP280/BME680/AM2320/LM75 temperature (+ BMP280/BME680 pressure, BME680/AM2320 humidity) matching their configured values — BMP280/BME680 via the real Bosch compensation-formula code path (`CUSTOM=BMP280T`/etc in their `.cfg`s), not just a linear scale factor |
+| `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, all six `Devs:Sensors/*.cfg` config files (LTC2990/MAX31760/LM75/BMP280/BME680/AM2320) parsed successfully |
+| `I2Clock` (Henryk Richter, `i2csensors` repo) | `SCAN` identifies three RTCs by vendor/chip name at their real addresses (`0x9E`/DS1629, `0xD0`/DS1307, `0x64`/R2025); `SAVE` then `SHOW` per chip proves the bus-write path, not just reads — it stores the guest's live system time on the chip and reads it straight back. PCF8583 is also I2Clock-testable this way in isolation, but not alongside `fan` in this same pass — see the config table's note on `pcf8583_address`/`fan_address` |
 
 This is the full oracle validation `PLAN.md`'s Phase 1/2 success criteria
 call for: unmodified `i2c.library` plus at least two existing Aminet
@@ -193,14 +209,17 @@ repo — useful general-purpose Amiga I2C tooling beyond just this
 board's own oracle pass.
 
 Not every device has (or can have) a `Devs:Sensors/*.cfg` sample: that
-format only covers `i2csensors.library`'s five sensor types (`TEMP`,
-`VOLTAGE`, `CURRENT`, `FAN`, `PRESSURE`) — LTC2990 and MAX31760 already
-had official ones upstream, LM75 got its own above, but the RTCs don't
-fit that format at all (there's no clock/calendar sensor type; `I2Clock`
-is the right tool for those instead), and neither do PCF8574 (GPIO),
-the EEPROM, or the LCD. If you write your own `Devs:Sensors/*.cfg`, two
-real quirks of `i2csensors.library`'s parser (`sensors/src/config.c`)
-are worth knowing: it expects Latin-1, not UTF-8 (a `°` written as UTF-8
+format only covers `i2csensors.library`'s own sensor types (`TEMP`,
+`VOLTAGE`, `CURRENT`, `FAN`, `PRESSURE`, `POWER`, `HUMIDITY`, `MISC` —
+`sensors/src/config.c`'s `conftypetag`) — LTC2990/MAX31760/BMP280/
+BME680/AM2320 already had official ones upstream (all fetched by
+`vendor/fetch-oracle.sh`), LM75 got its own in `examples/Sensors/
+LM75.cfg` since no official one exists for it, but the RTCs don't fit
+that format at all (there's no clock/calendar sensor type; `I2Clock` is
+the right tool for those instead), and neither do PCF8574 (GPIO), the
+EEPROM, or the LCD. If you write your own `Devs:Sensors/*.cfg`, two real
+quirks of `i2csensors.library`'s parser (`sensors/src/config.c`) are
+worth knowing: it expects Latin-1, not UTF-8 (a `°` written as UTF-8
 silently breaks a config file's device count), and it treats a closing
 `]` as ending the current section *even inside a `#` comment* — both
 found the hard way while writing `examples/Sensors/LM75.cfg`.

@@ -33,7 +33,9 @@ eeprom_size = "4096" # bytes; 24C32-class
 # eeprom_image = ""  # optional: type=file resource, initial EEPROM contents
 lm75 = "false"       # simplest temperature-sensor sample device
 ltc2990 = "true"     # the real board's own authentic monitor chip
+# ltc2990_address = "0x4C" # 0x4C=ICYv2/CPLDIcy/A3000DB (default), 0x4D=Fanny Card, 0x4F=BFG9060/ClockIIC (all 7-bit; halve the 8-bit i2csensors addresses)
 pcf8583 = "false"    # RTC sample device
+# pcf8583_address = "0x50" # shares an address with fan_address's default -- move one if enabling both
 # pcf8583_time = ""  # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
 ds1307 = "false"     # RTC sample device (fixed address 0x68, no address pins)
 # ds1307_time = ""   # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
@@ -43,7 +45,11 @@ r2025 = "false"      # RTC sample device (fixed address 0x32, no address pins)
 # r2025_time = ""    # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
 lcd = "false"        # HD44780 character LCD sample device (PCF8574 I2C backpack, address 0x27)
 lcd_columns = "16"   # visible characters per row, exported via host_log; 16x2 is the common physical size
+bmp280 = "false"     # Bosch temperature/pressure sample device (address 0x76)
+bme680 = "false"     # Bosch temperature/pressure/humidity sample device (address 0x77)
+am2320 = "false"     # Aosong temperature/humidity sample device (address 0x5C)
 fan = "true"         # the real board's own authentic MAX31760 fan controller
+# fan_address = "0x50" # 0x50=Fanny/CPLDIcy (default), 0x51=alternate Fanny strapping (both 7-bit)
 # scenario = ""      # optional: type=file resource, deterministic event timeline (see plugin/src/scenario.rs)
 
 [[option]]
@@ -77,9 +83,19 @@ label = "LTC2990 voltage/temperature monitor"
 type = "bool"
 
 [[option]]
+key = "ltc2990_address"
+label = "LTC2990 address (7-bit hex, e.g. 0x4C)"
+type = "string"
+
+[[option]]
 key = "pcf8583"
 label = "PCF8583 clock/calendar"
 type = "bool"
+
+[[option]]
+key = "pcf8583_address"
+label = "PCF8583 address (7-bit hex, e.g. 0x50)"
+type = "string"
 
 [[option]]
 key = "pcf8583_time"
@@ -127,9 +143,29 @@ label = "LCD columns"
 type = "int"
 
 [[option]]
+key = "bmp280"
+label = "BMP280 temperature/pressure sensor"
+type = "bool"
+
+[[option]]
+key = "bme680"
+label = "BME680 temperature/pressure/humidity sensor"
+type = "bool"
+
+[[option]]
+key = "am2320"
+label = "AM2320 temperature/humidity sensor"
+type = "bool"
+
+[[option]]
 key = "fan"
 label = "MAX31760 fan controller"
 type = "bool"
+
+[[option]]
+key = "fan_address"
+label = "MAX31760 address (7-bit hex, e.g. 0x50)"
+type = "string"
 
 [[option]]
 key = "scenario"

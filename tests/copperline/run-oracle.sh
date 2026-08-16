@@ -14,10 +14,10 @@
 # I2Clock CHIP=<x> SAVE SHOW exercises the RTC devices' bus-write path,
 # not just reads -- it stores the guest's current system time on the
 # chip, then reads it straight back. simplesensors additionally reads
-# devs/sensors/lm75.cfg -- unlike the LTC2990/MAX31760 configs above,
-# there's no official upstream one for this chip, so it's authored in
-# this repo instead (examples/Sensors/LM75.cfg, tracked in git, not
-# fetched from nondistributable/).
+# devs/sensors/lm75.cfg -- unlike the LTC2990/MAX31760/BMP280/BME680/
+# AM2320 configs, there's no official upstream one for the LM75, so
+# it's authored in this repo instead (examples/Sensors/LM75.cfg,
+# tracked in git, not fetched from nondistributable/).
 #
 # Output capture: these are ordinary AmigaDOS-linked binaries (not the
 # freestanding RawPutChar-over-serial probes the tier-2 rig uses), so
@@ -63,7 +63,10 @@ LTC2990_CFG="$NONDIST/i2csensors/Sensors/LTC2990.cfg"
 MAX31760_CFG="$NONDIST/i2csensors/Sensors/MAX31760_A0_Fanny.cfg"
 I2CLOCK="$NONDIST/i2csensors/I2Clock"
 LM75_CFG="$ROOT/examples/Sensors/LM75.cfg" # ours, not fetched -- see that file's own header
-for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG" "$I2CLOCK" "$LM75_CFG"; do
+BMP280_CFG="$NONDIST/i2csensors/Sensors/BMP280.cfg"
+BME680_CFG="$NONDIST/i2csensors/Sensors/BME680.cfg"
+AM2320_CFG="$NONDIST/i2csensors/Sensors/AM2320.cfg"
+for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG" "$I2CLOCK" "$LM75_CFG" "$BMP280_CFG" "$BME680_CFG" "$AM2320_CFG"; do
     [ -e "$f" ] || { echo "FAIL: missing oracle binary $f (run 'make fetch-oracle')" >&2; exit 2; }
 done
 
@@ -86,6 +89,9 @@ rm -f "$ADF"
     write "$LTC2990_CFG" devs/sensors/ltc2990.cfg + \
     write "$MAX31760_CFG" devs/sensors/max31760.cfg + \
     write "$LM75_CFG" devs/sensors/lm75.cfg + \
+    write "$BMP280_CFG" devs/sensors/bmp280.cfg + \
+    write "$BME680_CFG" devs/sensors/bme680.cfg + \
+    write "$AM2320_CFG" devs/sensors/am2320.cfg + \
     write "$HERE/oracle-startup-sequence.txt" s/startup-sequence \
     > /dev/null
 
@@ -121,9 +127,6 @@ cat "$OUTDIR/04-diagnostics.log" 2>/dev/null || echo "(missing)"
 echo ""
 echo "===== I2Clock SCAN ====="
 cat "$OUTDIR/05-i2clock-scan.log" 2>/dev/null || echo "(missing)"
-echo ""
-echo "===== I2Clock PCF8583 (SAVE + SHOW) ====="
-cat "$OUTDIR/06-i2clock-pcf8583.log" 2>/dev/null || echo "(missing)"
 echo ""
 echo "===== I2Clock DS1307 (SAVE + SHOW) ====="
 cat "$OUTDIR/07-i2clock-ds1307.log" 2>/dev/null || echo "(missing)"

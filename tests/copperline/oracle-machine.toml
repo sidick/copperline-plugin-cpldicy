@@ -4,9 +4,25 @@
 # directory mounted live so unmodified Shell redirection can capture
 # their output for the host to read back after the run.
 #
-# The four RTC devices are enabled here (off by default in the manifest
-# itself) so I2Clock's SCAN/SAVE/SHOW have something real to exercise --
-# see README.md's Oracle compatibility section for what that validates.
+# DS1307/DS1629/R2025/LM75/BMP280/BME680/AM2320 are enabled here (off by
+# default in the manifest itself) so I2Clock's SCAN/SAVE/SHOW and
+# simplesensors have something real to exercise -- see README.md's
+# Oracle compatibility section for what that validates.
+#
+# PCF8583 is deliberately NOT enabled here, even though it's also
+# I2Clock-oracle-testable in isolation: its default address (0x50) is
+# the same address this board's own authentic MAX31760 fan controller
+# uses (`fan`, on by default) -- a real conflict a real board would have
+# too (you can't populate both a MAX31760 and a PCF8583-at-A0 on the
+# same bus), not an artifact of this being a software emulation. With
+# both enabled, `I2cBusEngine::attach`'s address lookup silently
+# resolves to whichever device was attached first (`board.rs`'s
+# construction order), so FannyCtl/simplesensors would silently read
+# PCF8583's registers instead of the real MAX31760 -- confirmed the hard
+# way while validating BMP280/BME680/AM2320 (their addition made this
+# machine config enable pcf8583 alongside fan for the first time, and
+# FannyCtl's output turned out to be byte-identical whether fan was
+# enabled or not, which is what gave the collision away).
 
 [cpu]
 model = "68000"
@@ -26,7 +42,7 @@ write_protected = true
 
 [[zorro]]
 metadata = "../../manifest/cpldicy.toml"
-config = { pcf8583 = "true", ds1307 = "true", ds1629 = "true", r2025 = "true", lm75 = "true" }
+config = { ds1307 = "true", ds1629 = "true", r2025 = "true", lm75 = "true", bmp280 = "true", bme680 = "true", am2320 = "true" }
 
 [[filesys]]
 path = "oracle-out"

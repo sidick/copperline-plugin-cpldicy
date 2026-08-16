@@ -3,7 +3,6 @@ c/fannyctl VERBOSE >ORACLEOUT:02-fannyctl.log
 c/simplesensors >ORACLEOUT:03-simplesensors.log
 c/diagnostics >ORACLEOUT:04-diagnostics.log
 c/i2clock SCAN >ORACLEOUT:05-i2clock-scan.log
-c/i2clock CHIP=PCF8583 SAVE SHOW >ORACLEOUT:06-i2clock-pcf8583.log
 c/i2clock CHIP=DS1307 SAVE SHOW >ORACLEOUT:07-i2clock-ds1307.log
 c/i2clock CHIP=DS1629 SAVE SHOW >ORACLEOUT:08-i2clock-ds1629.log
 c/i2clock CHIP=R2025 SAVE SHOW >ORACLEOUT:09-i2clock-r2025.log

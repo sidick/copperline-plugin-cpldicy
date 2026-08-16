@@ -129,6 +129,21 @@ fn config_get_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+/// Reads an I2C address config value -- `"0x9A"`/`"0X9A"` (matching how
+/// this project's own doc comments and Henryk Richter's `i2csensors`
+/// config files write addresses) or plain decimal, either accepted.
+fn config_get_u8_address(key: &str, default: u8) -> u8 {
+    config_get_string(key)
+        .and_then(|s| {
+            let s = s.trim();
+            match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                Some(hex) => u8::from_str_radix(hex, 16).ok(),
+                None => s.parse().ok(),
+            }
+        })
+        .unwrap_or(default)
+}
+
 /// Reads a `<device>_time` config string, if present, and parses it via
 /// [`rtc_time::parse`]. A malformed value is logged and treated as
 /// absent (the device keeps its epoch default) rather than failing the
@@ -179,7 +194,9 @@ fn board_config_from_host() -> BoardConfig {
         eeprom_image: resource_get("eeprom_image"),
         lm75_enabled: config_get_bool("lm75", defaults.lm75_enabled),
         ltc2990_enabled: config_get_bool("ltc2990", defaults.ltc2990_enabled),
+        ltc2990_address: config_get_u8_address("ltc2990_address", defaults.ltc2990_address),
         pcf8583_enabled: config_get_bool("pcf8583", defaults.pcf8583_enabled),
+        pcf8583_address: config_get_u8_address("pcf8583_address", defaults.pcf8583_address),
         pcf8583_time: rtc_time_from_host("pcf8583_time"),
         ds1307_enabled: config_get_bool("ds1307", defaults.ds1307_enabled),
         ds1307_time: rtc_time_from_host("ds1307_time"),
@@ -189,7 +206,11 @@ fn board_config_from_host() -> BoardConfig {
         r2025_time: rtc_time_from_host("r2025_time"),
         lcd_enabled: config_get_bool("lcd", defaults.lcd_enabled),
         lcd_columns: config_get_usize("lcd_columns", defaults.lcd_columns),
+        bmp280_enabled: config_get_bool("bmp280", defaults.bmp280_enabled),
+        bme680_enabled: config_get_bool("bme680", defaults.bme680_enabled),
+        am2320_enabled: config_get_bool("am2320", defaults.am2320_enabled),
         fan_enabled: config_get_bool("fan", defaults.fan_enabled),
+        fan_address: config_get_u8_address("fan_address", defaults.fan_address),
         ..defaults
     }
 }

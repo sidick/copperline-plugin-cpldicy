@@ -1,5 +1,8 @@
 //! Virtual I2C bus residents (docs/PLAN.md section 3.4).
 
+pub mod am2320;
+pub mod bme680;
+pub mod bmp280;
 pub mod ds1307;
 pub mod ds1629;
 pub mod eeprom24;
