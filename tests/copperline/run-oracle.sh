@@ -1,16 +1,19 @@
 #!/bin/sh
 # run-oracle.sh -- tier 3 (docs/PLAN.md section 4): boots unmodified
 # guest oracle software (i2c.library's "bcu" driver, I2CScan,
-# i2csensors.library, simplesensors, FannyCtl) against a real Copperline
-# instance with manifest/cpldicy.toml fitted. No software written by
-# this project touches the guest -- this is the "no special casing"
-# validation docs/PLAN.md's Validation section calls for.
+# i2csensors.library, simplesensors, FannyCtl, I2Clock) against a real
+# Copperline instance with manifest/cpldicy.toml fitted. No software
+# written by this project touches the guest -- this is the "no special
+# casing" validation docs/PLAN.md's Validation section calls for.
 #
 # Binaries come from nondistributable/ (git-ignored -- see that
 # directory's own provenance notes / docs/board-facts.md §7): i2c.library
 # v40's "bcu" driver + I2CScan from Aminet docs/hard/i2clib40.lha, and
-# i2csensors.library/simplesensors/FannyCtl compiled binaries checked
-# into Henryk Richter's gitlab.com/HenrykRichter/i2csensors repo.
+# i2csensors.library/simplesensors/FannyCtl/I2Clock compiled binaries
+# checked into Henryk Richter's gitlab.com/HenrykRichter/i2csensors repo.
+# I2Clock CHIP=<x> SAVE SHOW exercises the RTC devices' bus-write path,
+# not just reads -- it stores the guest's current system time on the
+# chip, then reads it straight back.
 #
 # Output capture: these are ordinary AmigaDOS-linked binaries (not the
 # freestanding RawPutChar-over-serial probes the tier-2 rig uses), so
@@ -54,7 +57,8 @@ DIAGNOSTICS="$NONDIST/i2csensors/diagnostics"
 FANNYCTL="$NONDIST/i2csensors/FannyCtl"
 LTC2990_CFG="$NONDIST/i2csensors/Sensors/LTC2990.cfg"
 MAX31760_CFG="$NONDIST/i2csensors/Sensors/MAX31760_A0_Fanny.cfg"
-for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG"; do
+I2CLOCK="$NONDIST/i2csensors/I2Clock"
+for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG" "$I2CLOCK"; do
     [ -e "$f" ] || { echo "FAIL: missing oracle binary $f (run 'make fetch-oracle')" >&2; exit 2; }
 done
 
@@ -71,6 +75,7 @@ rm -f "$ADF"
     write "$SIMPLESENSORS" c/simplesensors + \
     write "$DIAGNOSTICS" c/diagnostics + \
     write "$FANNYCTL" c/fannyctl + \
+    write "$I2CLOCK" c/i2clock + \
     write "$I2C_BCU" libs/i2c.library + \
     write "$I2CSENSORS_LIB" libs/i2csensors.library + \
     write "$LTC2990_CFG" devs/sensors/ltc2990.cfg + \
@@ -107,6 +112,21 @@ cat "$OUTDIR/03-simplesensors.log" 2>/dev/null || echo "(missing)"
 echo ""
 echo "===== diagnostics ====="
 cat "$OUTDIR/04-diagnostics.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== I2Clock SCAN ====="
+cat "$OUTDIR/05-i2clock-scan.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== I2Clock PCF8583 (SAVE + SHOW) ====="
+cat "$OUTDIR/06-i2clock-pcf8583.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== I2Clock DS1307 (SAVE + SHOW) ====="
+cat "$OUTDIR/07-i2clock-ds1307.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== I2Clock DS1629 (SAVE + SHOW) ====="
+cat "$OUTDIR/08-i2clock-ds1629.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== I2Clock R2025 (SAVE + SHOW) ====="
+cat "$OUTDIR/09-i2clock-r2025.log" 2>/dev/null || echo "(missing)"
 echo ""
 
 echo "Oracle pass ran to completion. Inspect the logs above (and $OUTDIR) for pass/fail judgement -- unlike run.sh, this script doesn't grep for PASS/FAIL markers, since it's driving unmodified third-party tools with their own native output formats, not this project's own probe."

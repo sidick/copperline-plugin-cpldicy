@@ -102,7 +102,7 @@ entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 | `eeprom_image` | — | `type=file`: initial EEPROM contents |
 | `lm75` | `false` | LM75 temperature sensor sample device (address 0x48) |
 | `ltc2990` | `true` | the real board's own authentic monitor chip (address 0x4C) |
-| `pcf8583` | `false` | RTC sample device (address 0x51) |
+| `pcf8583` | `false` | RTC sample device (address 0x50) |
 | `pcf8583_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
 | `ds1307` | `false` | RTC sample device (fixed address 0x68) |
 | `ds1307_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
@@ -174,6 +174,7 @@ in this repository patches or special-cases any of it:
 | `FannyCtl` (Henryk Richter, [`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master) repo) | Reads the MAX31760's full register/LUT state at its documented default address (0xA0) without error |
 | `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels |
 | `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, both `Devs:Sensors/*.cfg` config files parsed successfully |
+| `I2Clock` (Henryk Richter, `i2csensors` repo) | `SCAN` identifies all four RTCs by vendor/chip name at their real addresses (`0x9E`/DS1629, `0xA0`/PCF8583, `0xD0`/DS1307, `0x64`/R2025); `SAVE` then `SHOW` per chip proves the bus-write path, not just reads — it stores the guest's live system time on the chip and reads it straight back |
 
 This is the full oracle validation `PLAN.md`'s Phase 1/2 success criteria
 call for: unmodified `i2c.library` plus at least two existing Aminet

@@ -2,6 +2,12 @@
 //! as [`crate::devices::pcf8583::Pcf8583`] but modeling Maxim/Dallas's
 //! chip instead of Philips's (both are `SetClockI2C`-supported RTCs --
 //! see the tool's package docs at https://aminet.net/package/docs/hard/SetClockI2C).
+//! Also bus-writable, same as `pcf8583.rs`: Henryk Richter's `i2clock`
+//! (part of the `i2csensors` repo,
+//! https://gitlab.com/HenrykRichter/i2csensors, `i2cclass_rtc.c`'s
+//! `i2c_RTCReadDS1307`/`i2c_RTCWriteDS1307`) writes a full 7-byte time
+//! block to registers 0x00-0x06 at this exact address, matching this
+//! device's register layout byte-for-byte.
 //!
 //! Registers modeled: 0x00 seconds (bit 7 = CH, clock-halt), 0x01
 //! minutes, 0x02 hours, 0x03 day-of-week, 0x04 date, 0x05 month, 0x06
@@ -17,13 +23,17 @@
 //!
 //! Deliberately does *not* free-run against `tick()`, for the same
 //! reason as `pcf8583.rs`'s module docs: reproducibility across
-//! CPU/warp settings. Time only changes when a scenario or test
-//! explicitly sets it.
+//! CPU/warp settings. Time only advances when a scenario/test calls
+//! `set_time`, or the guest writes it over the bus -- never on its own.
 
 use crate::i2c::I2cDevice;
 
 fn to_bcd(value: u8) -> u8 {
     ((value / 10) << 4) | (value % 10)
+}
+
+fn from_bcd(byte: u8) -> u8 {
+    (byte >> 4) * 10 + (byte & 0x0F)
 }
 
 /// Fixed I2C address of every real DS1307 -- no address pins to strap.
@@ -95,11 +105,18 @@ impl Ds1307 {
     }
 
     fn write_register(&mut self, reg: u8, byte: u8) {
-        // Only the control register is writable from this emulation's
-        // perspective -- time is set wholesale via `set_time`, same
-        // restriction and reasoning as `Pcf8583::write_register`.
-        if reg == 0x07 {
-            self.control = byte;
+        match reg {
+            // Mask off CH (module docs: never modeled as actually
+            // halting anything) so it can't corrupt the BCD decode.
+            0x00 => self.time.second = from_bcd(byte & 0x7F),
+            0x01 => self.time.minute = from_bcd(byte & 0x7F),
+            0x02 => self.time.hour = from_bcd(byte & 0x3F), // mask off the unmodeled 12/24-mode bits
+            0x03 => self.time.weekday = byte & 0x07,
+            0x04 => self.time.date = from_bcd(byte & 0x3F),
+            0x05 => self.time.month = from_bcd(byte & 0x1F),
+            0x06 => self.time.year = from_bcd(byte),
+            0x07 => self.control = byte,
+            _ => {} // general NV RAM area, not modeled
         }
     }
 }
@@ -191,13 +208,31 @@ mod tests {
     }
 
     #[test]
-    fn writes_to_time_registers_are_ignored() {
+    fn a_bus_write_to_the_time_registers_round_trips_through_a_read() {
+        let mut dev = Ds1307::new();
+        dev.start(false);
+        dev.write(0x00); // pointer -> seconds
+        for byte in [0x58, 0x59, 0x23, 0x05, 0x31, 0x12, 0x99] {
+            dev.write(byte); // seconds, minutes, hours, weekday, date, month, year
+        }
+
+        assert_eq!(read_reg(&mut dev, 0x00), 0x58);
+        assert_eq!(read_reg(&mut dev, 0x01), 0x59);
+        assert_eq!(read_reg(&mut dev, 0x02), 0x23);
+        assert_eq!(read_reg(&mut dev, 0x03), 0x05);
+        assert_eq!(read_reg(&mut dev, 0x04), 0x31);
+        assert_eq!(read_reg(&mut dev, 0x05), 0x12);
+        assert_eq!(read_reg(&mut dev, 0x06), 0x99);
+    }
+
+    #[test]
+    fn the_ch_bit_is_masked_off_the_seconds_write_rather_than_corrupting_the_decode() {
         let mut dev = Ds1307::new();
         dev.start(false);
         dev.write(0x00);
-        dev.write(0x58); // attempt to set seconds directly
+        dev.write(0x80 | 0x58); // CH=1 (stop-clock flag) alongside seconds=:58
 
-        assert_eq!(read_reg(&mut dev, 0x00), 0x00, "time is set wholesale via set_time, not per-register writes");
+        assert_eq!(read_reg(&mut dev, 0x00), 0x58, "CH always reads 0 (module docs) and never taints the BCD digits");
     }
 
     #[test]

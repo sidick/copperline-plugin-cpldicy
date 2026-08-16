@@ -16,7 +16,14 @@
 //! same as a real DS1629 would) but reads back all-zero and ignores
 //! further writes, the same "unmodeled surface reads as zero" choice
 //! `fan.rs` makes for MAX31760 registers this board's scenarios don't
-//! exercise.
+//! exercise. This exact `0xC0`-then-pointer shape (and this device's
+//! 0x4F address) is also what Henryk Richter's `i2clock` (part of the
+//! `i2csensors` repo, https://gitlab.com/HenrykRichter/i2csensors,
+//! `i2cclass_rtc.c`'s `i2c_RTCReadDS1609`/`i2c_RTCWriteDS1609` -- it
+//! calls this chip "DS1609" internally, but the wire protocol and
+//! address are the DS1629's) sends against a real chip, so the clock
+//! register bank being bus-writable is what makes this device
+//! oracle-testable against that real, unmodified tool.
 //!
 //! Registers modeled (Access Clock's 7-byte clock register, DS1629
 //! datasheet Figure 2): 0x00 seconds (bit 7 = CH, clock-halt), 0x01
@@ -34,12 +41,17 @@
 //!
 //! Deliberately does *not* free-run against `tick()`, for the same
 //! reproducibility reasoning as `pcf8583.rs`'s module docs. Time only
-//! changes when a scenario or test explicitly sets it.
+//! advances when a scenario/test calls `set_time`, or the guest writes
+//! it over the bus -- never on its own.
 
 use crate::i2c::I2cDevice;
 
 fn to_bcd(value: u8) -> u8 {
     ((value / 10) << 4) | (value % 10)
+}
+
+fn from_bcd(byte: u8) -> u8 {
+    (byte >> 4) * 10 + (byte & 0x0F)
 }
 
 /// Fixed I2C address of every real DS1629 -- its 3 device-select bits
@@ -117,6 +129,21 @@ impl Ds1629 {
             _ => 0x00,
         }
     }
+
+    fn write_register(&mut self, reg: u8, byte: u8) {
+        match reg {
+            // Mask off CH (module docs: never modeled as actually
+            // halting anything) so it can't corrupt the BCD decode.
+            0x00 => self.time.second = from_bcd(byte & 0x7F),
+            0x01 => self.time.minute = from_bcd(byte & 0x7F),
+            0x02 => self.time.hour = from_bcd(byte & 0x3F), // mask off the unmodeled 12/24-mode bits
+            0x03 => self.time.weekday = byte & 0x07,
+            0x04 => self.time.date = from_bcd(byte & 0x3F),
+            0x05 => self.time.month = from_bcd(byte & 0x1F),
+            0x06 => self.time.year = from_bcd(byte),
+            _ => {} // reg is always 0-6 (mod 7 in the caller), kept exhaustive-looking for clarity
+        }
+    }
 }
 
 impl Default for Ds1629 {
@@ -150,11 +177,7 @@ impl I2cDevice for Ds1629 {
                 self.state = State::ClockRegisterAccess;
             }
             State::ClockRegisterAccess => {
-                // No clock register is bus-writable in this emulation
-                // (time is set wholesale via `set_time`, same
-                // restriction as `Pcf8583`/`Ds1307`) -- just advance
-                // the pointer so a multi-byte write sequence still
-                // completes without desyncing a following read.
+                self.write_register(self.pointer, byte);
                 self.pointer = (self.pointer + 1) % 7;
             }
             State::Unimplemented => {}
@@ -245,6 +268,25 @@ mod tests {
             dev.read(true); // hours, weekday, date, month, year
         }
         assert_eq!(dev.read(true), 0x58, "pointer wraps back to seconds after year");
+    }
+
+    #[test]
+    fn a_bus_write_to_the_clock_registers_round_trips_through_a_read() {
+        let mut dev = Ds1629::new();
+        dev.start(false);
+        dev.write(ACCESS_CLOCK);
+        dev.write(0x00); // pointer -> seconds
+        for byte in [0x58, 0x59, 0x23, 0x05, 0x31, 0x12, 0x99] {
+            dev.write(byte); // seconds, minutes, hours, weekday, date, month, year
+        }
+
+        assert_eq!(read_reg(&mut dev, 0x00), 0x58);
+        assert_eq!(read_reg(&mut dev, 0x01), 0x59);
+        assert_eq!(read_reg(&mut dev, 0x02), 0x23);
+        assert_eq!(read_reg(&mut dev, 0x03), 0x05);
+        assert_eq!(read_reg(&mut dev, 0x04), 0x31);
+        assert_eq!(read_reg(&mut dev, 0x05), 0x12);
+        assert_eq!(read_reg(&mut dev, 0x06), 0x99);
     }
 
     #[test]

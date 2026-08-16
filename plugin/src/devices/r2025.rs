@@ -2,6 +2,13 @@
 //! sample role as [`crate::devices::pcf8583::Pcf8583`], the fourth and
 //! last `SetClockI2C`-supported RTC this board models (see the tool's
 //! package docs at https://aminet.net/package/docs/hard/SetClockI2C).
+//! Also bus-writable, same as the other three: Henryk Richter's
+//! `i2clock` (part of the `i2csensors` repo,
+//! https://gitlab.com/HenrykRichter/i2csensors, `i2cclass_rtc.c`'s
+//! `i2c_RTCReadR2025`/`i2c_RTCWriteR2025`) targets this exact address
+//! and writes the same 0x0-0x6 time-register block this device models
+//! (alongside 0xE/0xF control-register and 0x7 oscillator-adjustment
+//! writes this emulation doesn't act on -- see below).
 //!
 //! Registers modeled (R2025 datasheet's "Address Mapping" table,
 //! addresses 0h-6h): 0x0 seconds, 0x1 minutes, 0x2 hours, 0x3
@@ -9,15 +16,14 @@
 //! day-of-week (plain binary 0-6, correspondence to weekday names is
 //! user-definable on a real chip, matching the datasheet's own
 //! "Sunday = 0,0,0" example). Addresses 0x7 (oscillation adjustment)
-//! and 0x8-0xF (alarm/control registers) aren't modeled: nothing in
-//! this board's use case reads them, same restraint as
-//! `pcf8583.rs`/`ds1307.rs`/`ds1629.rs`. In particular, the 12/24-hour
-//! mode bit lives in the unmodeled Control Register 1 (address 0xE);
-//! this emulation always presents the hour byte in 24-hour BCD
-//! regardless, same convention as the other three RTCs here. The
-//! century bit (address 0x5, D7) isn't tracked either, for the same
-//! "no scenario needs it" reason `pcf8583.rs` doesn't track a full
-//! 4-digit year.
+//! and 0x8-0xF (alarm/control registers) aren't modeled -- writes to
+//! them are accepted (ACKed) but discarded, same restraint as
+//! `pcf8583.rs`'s general RAM area. In particular, the 12/24-hour mode
+//! bit lives in the unmodeled Control Register 1 (address 0xE); this
+//! emulation always presents the hour byte in 24-hour BCD regardless,
+//! same convention as the other three RTCs here. The century bit
+//! (address 0x5, D7) isn't tracked either, for the same "no scenario
+//! needs it" reason `pcf8583.rs` doesn't track a full 4-digit year.
 //!
 //! Addressing is unlike the other three RTCs: the byte immediately
 //! after the slave address packs a 4-bit address pointer in its high
@@ -35,12 +41,17 @@
 //!
 //! Deliberately does *not* free-run against `tick()`, for the same
 //! reproducibility reasoning as `pcf8583.rs`'s module docs. Time only
-//! changes when a scenario or test explicitly sets it.
+//! advances when a scenario/test calls `set_time`, or the guest writes
+//! it over the bus -- never on its own.
 
 use crate::i2c::I2cDevice;
 
 fn to_bcd(value: u8) -> u8 {
     ((value / 10) << 4) | (value % 10)
+}
+
+fn from_bcd(byte: u8) -> u8 {
+    (byte >> 4) * 10 + (byte & 0x0F)
 }
 
 /// Fixed I2C address of every real R2025 -- no address pins to strap.
@@ -102,6 +113,19 @@ impl R2025 {
             _ => 0x00,
         }
     }
+
+    fn write_register(&mut self, reg: u8, byte: u8) {
+        match reg {
+            0x00 => self.time.second = from_bcd(byte & 0x7F), // D7 is unused, mask defensively
+            0x01 => self.time.minute = from_bcd(byte & 0x7F),
+            0x02 => self.time.hour = from_bcd(byte & 0x3F), // mask off the unmodeled 12/24-mode bits
+            0x03 => self.time.weekday = byte & 0x07,
+            0x04 => self.time.date = from_bcd(byte & 0x3F),
+            0x05 => self.time.month = from_bcd(byte & 0x1F), // mask off the unmodeled century bit
+            0x06 => self.time.year = from_bcd(byte),
+            _ => {} // oscillator-adjustment/alarm/control registers, not modeled
+        }
+    }
 }
 
 impl Default for R2025 {
@@ -127,11 +151,7 @@ impl I2cDevice for R2025 {
             self.awaiting_pointer = false;
             return true;
         }
-        // No register is bus-writable in this emulation (time is set
-        // wholesale via `set_time`, same restriction as
-        // `Pcf8583`/`Ds1307`) -- just advance the pointer so a
-        // multi-byte write sequence still completes without desyncing
-        // a following read.
+        self.write_register(self.pointer, byte);
         self.pointer = (self.pointer + 1) & 0x0F;
         true
     }
@@ -142,7 +162,22 @@ impl I2cDevice for R2025 {
         byte
     }
 
-    fn stop(&mut self) {}
+    fn stop(&mut self) {
+        // "The internal address pointer is set to Fh when the Stop
+        // Condition is met" (datasheet §"Data transmission read format
+        // of the R2025S/D") -- confirmed load-bearing by the oracle
+        // pass: `i2clock`'s `i2c_RTCReadR2025` does a bare burst read
+        // with no preceding pointer-set write at all, discarding its
+        // first byte and expecting the second to be the seconds
+        // register. That only lines up if a prior STOP (from the
+        // preceding SAVE, or from power-on) already parked the pointer
+        // at 0xF, so the read's first (discarded) byte is 0xF and the
+        // next one is 0x0 (seconds). Without this reset, a real chip
+        // (and this emulation, before this fix) would resume from
+        // wherever the last transaction's pointer was left, reading
+        // the wrong registers entirely.
+        self.pointer = 0x0F;
+    }
 }
 
 #[cfg(test)]
@@ -188,6 +223,27 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_condition_parks_the_pointer_at_0xf_for_the_next_bare_burst_read() {
+        // Reproduces `i2clock`'s actual real-world access pattern
+        // (module docs on `stop`): set the pointer to something
+        // mid-register, STOP, then read without ever writing a new
+        // pointer -- the first byte back should be the (unmodeled)
+        // register at 0xF, and the second should be seconds.
+        let mut dev = R2025::new();
+        dev.set_time(DateTime {
+            second: 58,
+            ..DateTime::EPOCH
+        });
+        dev.start(false);
+        dev.write(0x30); // pointer -> 0x3 (weekday), well away from 0xF
+        dev.stop();
+
+        dev.start(true);
+        assert_eq!(dev.read(true), 0x00, "register 0xF isn't modeled");
+        assert_eq!(dev.read(true), 0x58, "second byte of the burst is seconds");
+    }
+
+    #[test]
     fn pointer_auto_increments_across_a_burst_read_and_wraps_at_the_nibble_boundary() {
         let mut dev = R2025::new();
         dev.set_time(DateTime {
@@ -206,13 +262,30 @@ mod tests {
     }
 
     #[test]
-    fn writes_to_time_registers_are_ignored() {
+    fn a_bus_write_to_the_time_registers_round_trips_through_a_read() {
         let mut dev = R2025::new();
         dev.start(false);
         dev.write(0x00); // pointer=0x0 (seconds), format=0000
-        dev.write(0x58); // attempt to set seconds directly
+        for byte in [0x58, 0x59, 0x23, 0x06, 0x31, 0x12, 0x99] {
+            dev.write(byte); // seconds, minutes, hours, weekday, date, month, year
+        }
 
-        assert_eq!(read_reg(&mut dev, 0x00), 0x00, "time is set wholesale via set_time, not per-register writes");
+        assert_eq!(read_reg(&mut dev, 0x00), 0x58);
+        assert_eq!(read_reg(&mut dev, 0x01), 0x59);
+        assert_eq!(read_reg(&mut dev, 0x02), 0x23);
+        assert_eq!(read_reg(&mut dev, 0x03), 0x06);
+        assert_eq!(read_reg(&mut dev, 0x04), 0x31);
+        assert_eq!(read_reg(&mut dev, 0x05), 0x12);
+        assert_eq!(read_reg(&mut dev, 0x06), 0x99);
+    }
+
+    #[test]
+    fn writes_to_the_unmodeled_control_registers_are_accepted_but_discarded() {
+        let mut dev = R2025::new();
+        dev.start(false);
+        dev.write(0xE0); // pointer=0xE (Control Register 1), format=0000
+        assert!(dev.write(0x20)); // ACKed, matching a real chip
+        assert_eq!(read_reg(&mut dev, 0x0E), 0x00, "not modeled -- always reads back 0");
     }
 
     #[test]

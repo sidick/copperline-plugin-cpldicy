@@ -9,8 +9,8 @@
 # Sources:
 #   - i2c.library v40 (Wilhelm Noeker/Brian Ipsen), Aminet docs/hard,
 #     postcard-ware for non-profit use.
-#   - i2csensors.library/simplesensors/diagnostics/FannyCtl (Henryk
-#     Richter, GPL-2.0), gitlab.com/HenrykRichter/i2csensors.
+#   - i2csensors.library/simplesensors/diagnostics/FannyCtl/I2Clock
+#     (Henryk Richter, GPL-2.0), gitlab.com/HenrykRichter/i2csensors.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -34,5 +34,6 @@ BASE="https://gitlab.com/HenrykRichter/i2csensors/-/raw/master"
 [ -e "$I2CS/i2csensors.library" ] || curl -sL -o "$I2CS/i2csensors.library" "$BASE/sensors/libs/i2csensors.library"
 [ -e "$I2CS/Sensors/LTC2990.cfg" ] || curl -sL -o "$I2CS/Sensors/LTC2990.cfg" "$BASE/sensors/devs/Sensors/LTC2990.cfg"
 [ -e "$I2CS/Sensors/MAX31760_A0_Fanny.cfg" ] || curl -sL -o "$I2CS/Sensors/MAX31760_A0_Fanny.cfg" "$BASE/sensors/devs/Sensors/MAX31760_A0_Fanny.cfg"
+[ -e "$I2CS/I2Clock" ] || curl -sL -o "$I2CS/I2Clock" "$BASE/i2clock/I2Clock"
 
 echo "Oracle binaries present in $NONDIST"

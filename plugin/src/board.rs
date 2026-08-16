@@ -98,7 +98,14 @@ impl Default for BoardConfig {
             ltc2990_enabled: true,
             ltc2990_address: 0x4C, // docs/board-facts.md §6
             pcf8583_enabled: false,
-            pcf8583_address: 0x51,
+            // 0x50 (0xA0/0xA1 8-bit), not 0x51: this is the only address
+            // Henryk Richter's `i2clock` (part of the `i2csensors` repo,
+            // https://gitlab.com/HenrykRichter/i2csensors) recognizes a
+            // PCF8583 at (i2cclass_rtc.c's I2C_PHILIPSA0) -- matching it
+            // is what makes this device oracle-testable against real,
+            // unmodified guest software rather than just this crate's
+            // own tests.
+            pcf8583_address: 0x50,
             pcf8583_time: None,
             ds1307_enabled: false,
             ds1307_time: None,

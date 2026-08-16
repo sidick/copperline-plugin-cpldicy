@@ -1,8 +1,12 @@
 # Copperline machine profile for the guest-oracle conformance pass
 # (docs/PLAN.md section 4 tier 3): boots real i2c.library + FannyCtl +
-# simplesensors against manifest/cpldicy.toml, with a host directory
-# mounted live so unmodified Shell redirection can capture their output
-# for the host to read back after the run.
+# simplesensors + I2Clock against manifest/cpldicy.toml, with a host
+# directory mounted live so unmodified Shell redirection can capture
+# their output for the host to read back after the run.
+#
+# The four RTC devices are enabled here (off by default in the manifest
+# itself) so I2Clock's SCAN/SAVE/SHOW have something real to exercise --
+# see README.md's Oracle compatibility section for what that validates.
 
 [cpu]
 model = "68000"
@@ -22,6 +26,7 @@ write_protected = true
 
 [[zorro]]
 metadata = "../../manifest/cpldicy.toml"
+config = { pcf8583 = "true", ds1307 = "true", ds1629 = "true", r2025 = "true" }
 
 [[filesys]]
 path = "oracle-out"
