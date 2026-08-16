@@ -40,6 +40,7 @@ pub mod devices;
 pub mod fan;
 pub mod i2c;
 pub mod pcf8584;
+pub mod rtc_time;
 pub mod scenario;
 
 use board::{Board, BoardConfig};
@@ -128,6 +129,23 @@ fn config_get_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+/// Reads a `<device>_time` config string, if present, and parses it via
+/// [`rtc_time::parse`]. A malformed value is logged and treated as
+/// absent (the device keeps its epoch default) rather than failing the
+/// whole board -- same "don't let one bad config value take the rest of
+/// the board down with it" choice `scenario_from_host` makes for a
+/// malformed scenario file.
+fn rtc_time_from_host(key: &str) -> Option<rtc_time::WallClock> {
+    let raw = config_get_string(key)?;
+    match rtc_time::parse(&raw) {
+        Ok(time) => Some(time),
+        Err(e) => {
+            host_log(&format!("cpldicy: {key} config error: {e}"));
+            None
+        }
+    }
+}
+
 /// Read an entire file-typed resource (e.g. `eeprom_image`, `scenario`).
 /// `None` if the resource is absent.
 fn resource_get(key: &str) -> Option<Vec<u8>> {
@@ -162,6 +180,13 @@ fn board_config_from_host() -> BoardConfig {
         lm75_enabled: config_get_bool("lm75", defaults.lm75_enabled),
         ltc2990_enabled: config_get_bool("ltc2990", defaults.ltc2990_enabled),
         pcf8583_enabled: config_get_bool("pcf8583", defaults.pcf8583_enabled),
+        pcf8583_time: rtc_time_from_host("pcf8583_time"),
+        ds1307_enabled: config_get_bool("ds1307", defaults.ds1307_enabled),
+        ds1307_time: rtc_time_from_host("ds1307_time"),
+        ds1629_enabled: config_get_bool("ds1629", defaults.ds1629_enabled),
+        ds1629_time: rtc_time_from_host("ds1629_time"),
+        r2025_enabled: config_get_bool("r2025", defaults.r2025_enabled),
+        r2025_time: rtc_time_from_host("r2025_time"),
         fan_enabled: config_get_bool("fan", defaults.fan_enabled),
         ..defaults
     }

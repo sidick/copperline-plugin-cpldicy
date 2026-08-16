@@ -34,6 +34,13 @@ eeprom_size = "4096" # bytes; 24C32-class
 lm75 = "false"       # simplest temperature-sensor sample device
 ltc2990 = "true"     # the real board's own authentic monitor chip
 pcf8583 = "false"    # RTC sample device
+# pcf8583_time = ""  # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
+ds1307 = "false"     # RTC sample device (fixed address 0x68, no address pins)
+# ds1307_time = ""   # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
+ds1629 = "false"     # RTC sample device (fixed address 0x4F, command-dispatch protocol)
+# ds1629_time = ""   # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
+r2025 = "false"      # RTC sample device (fixed address 0x32, no address pins)
+# r2025_time = ""    # optional: "YYYY-MM-DD HH:MM:SS", initial time (defaults to the epoch if unset)
 fan = "true"         # the real board's own authentic MAX31760 fan controller
 # scenario = ""      # optional: type=file resource, deterministic event timeline (see plugin/src/scenario.rs)
 
@@ -71,6 +78,41 @@ type = "bool"
 key = "pcf8583"
 label = "PCF8583 clock/calendar"
 type = "bool"
+
+[[option]]
+key = "pcf8583_time"
+label = "PCF8583 initial time (YYYY-MM-DD HH:MM:SS)"
+type = "string"
+
+[[option]]
+key = "ds1307"
+label = "DS1307 clock/calendar"
+type = "bool"
+
+[[option]]
+key = "ds1307_time"
+label = "DS1307 initial time (YYYY-MM-DD HH:MM:SS)"
+type = "string"
+
+[[option]]
+key = "ds1629"
+label = "DS1629 clock/calendar"
+type = "bool"
+
+[[option]]
+key = "ds1629_time"
+label = "DS1629 initial time (YYYY-MM-DD HH:MM:SS)"
+type = "string"
+
+[[option]]
+key = "r2025"
+label = "R2025 clock/calendar"
+type = "bool"
+
+[[option]]
+key = "r2025_time"
+label = "R2025 initial time (YYYY-MM-DD HH:MM:SS)"
+type = "string"
 
 [[option]]
 key = "fan"

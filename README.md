@@ -67,10 +67,10 @@ identical configuration, so you can also switch between them later.
    select it.
 4. The board appears with a header row (its declared name, "CPLDIcy
    I2C") and one row per config option below it — toggle buttons for the
-   `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`fan` bools, a stepper
-   for `eeprom_size`, and **Browse**/**Clear** buttons for the `file`-typed
-   `eeprom_image`/`scenario` options (see the table below for what each
-   does).
+   `pcf8574`/`eeprom`/`lm75`/`ltc2990`/`pcf8583`/`ds1307`/`ds1629`/`r2025`/
+   `fan` bools, a stepper for `eeprom_size`, and **Browse**/**Clear**
+   buttons for the `file`-typed `eeprom_image`/`scenario` options (see
+   the table below for what each does).
 5. Click **Run** to boot with the board fitted, or use the **Save As**/
    **Save default** actions at the bottom of the screen to persist this
    configuration to a `.toml` file (or as Copperline's own default) for
@@ -102,8 +102,21 @@ entry (or clicking **Remove** in the GUI) — nothing to uninstall.
 | `lm75` | `false` | LM75 temperature sensor sample device (address 0x48) |
 | `ltc2990` | `true` | the real board's own authentic monitor chip (address 0x4C) |
 | `pcf8583` | `false` | RTC sample device (address 0x51) |
+| `pcf8583_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
+| `ds1307` | `false` | RTC sample device (fixed address 0x68) |
+| `ds1307_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
+| `ds1629` | `false` | RTC sample device (fixed address 0x4F, command-dispatch protocol) |
+| `ds1629_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
+| `r2025` | `false` | RTC sample device (fixed address 0x32) |
+| `r2025_time` | — | `"YYYY-MM-DD HH:MM:SS"`: initial time (defaults to the epoch if unset) |
 | `fan` | `true` | the real board's own authentic MAX31760 fan controller (address 0x50) |
 | `scenario` | — | `type=file`: deterministic event timeline, see `plugin/src/scenario.rs` |
+
+The four `_time` options don't default to the wall-clock time of the
+machine running Copperline -- the plugin ABI has no host-time import to
+read it from (see [issue #10](https://github.com/sidick/copperline-plugin-cpldicy/issues/10)).
+Leave a `_time` option unset and the corresponding RTC starts at a fixed
+epoch instead.
 
 ### Scenario format
 

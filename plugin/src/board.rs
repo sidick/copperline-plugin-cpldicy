@@ -31,14 +31,18 @@
 //! see `crate::i2c`'s module docs for why one instance needs two access
 //! paths instead of two independent copies of device state.
 
+use crate::devices::ds1307::{self, Ds1307, DS1307_ADDRESS};
+use crate::devices::ds1629::{self, Ds1629, DS1629_ADDRESS};
 use crate::devices::eeprom24::Eeprom24;
 use crate::devices::lm75::Lm75;
 use crate::devices::ltc2990::Ltc2990;
 use crate::devices::pcf8583::{DateTime, Pcf8583};
 use crate::devices::pcf8574::Pcf8574;
+use crate::devices::r2025::{self, R2025, R2025_ADDRESS};
 use crate::fan::{Max31760, MAX31760_ADDRESS};
 use crate::i2c::{I2cBusEngine, SharedDevice};
 use crate::pcf8584::Pcf8584;
+use crate::rtc_time::WallClock;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -50,8 +54,8 @@ const OPEN_BUS_BYTE: u8 = 0xFF;
 /// default on -- the GPIO expander because Phase 1's `i2c.library` gate
 /// depends on it being there out of the box, LTC2990/fan because they're
 /// the real board's own authentic residents (docs/board-facts.md §5-6).
-/// EEPROM/LM75/PCF8583 are opt-in teaching devices, off by default to
-/// keep an out-of-the-box bus scan uncluttered.
+/// EEPROM/LM75/PCF8583/DS1307/DS1629/R2025 are opt-in teaching devices,
+/// off by default to keep an out-of-the-box bus scan uncluttered.
 pub struct BoardConfig {
     pub pcf8574_enabled: bool,
     pub pcf8574_address: u8,
@@ -65,6 +69,13 @@ pub struct BoardConfig {
     pub ltc2990_address: u8,
     pub pcf8583_enabled: bool,
     pub pcf8583_address: u8,
+    pub pcf8583_time: Option<WallClock>,
+    pub ds1307_enabled: bool,
+    pub ds1307_time: Option<WallClock>,
+    pub ds1629_enabled: bool,
+    pub ds1629_time: Option<WallClock>,
+    pub r2025_enabled: bool,
+    pub r2025_time: Option<WallClock>,
     pub fan_enabled: bool,
 }
 
@@ -83,6 +94,13 @@ impl Default for BoardConfig {
             ltc2990_address: 0x4C, // docs/board-facts.md §6
             pcf8583_enabled: false,
             pcf8583_address: 0x51,
+            pcf8583_time: None,
+            ds1307_enabled: false,
+            ds1307_time: None,
+            ds1629_enabled: false,
+            ds1629_time: None,
+            r2025_enabled: false,
+            r2025_time: None,
             fan_enabled: true,
         }
     }
@@ -102,6 +120,9 @@ pub struct Board {
     lm75: Option<Rc<RefCell<Lm75>>>,
     ltc2990: Option<Rc<RefCell<Ltc2990>>>,
     pcf8583: Option<Rc<RefCell<Pcf8583>>>,
+    ds1307: Option<Rc<RefCell<Ds1307>>>,
+    ds1629: Option<Rc<RefCell<Ds1629>>>,
+    r2025: Option<Rc<RefCell<R2025>>>,
     fan: Option<Rc<RefCell<Max31760>>>,
     /// Name -> configured address, for enabled devices only -- lets
     /// [`crate::scenario`] target a fault fixture ("unplug the sensor")
@@ -121,6 +142,58 @@ fn attach<T: crate::i2c::I2cDevice + 'static>(
     let shared = Rc::new(RefCell::new(device));
     bus.attach(addr, Box::new(SharedDevice(Rc::clone(&shared))));
     shared
+}
+
+/// Converts a parsed `<device>_time` config value into each RTC's own
+/// `DateTime` shape -- each device truncates the year and remaps the
+/// weekday to its own convention differently, per its module docs.
+fn pcf8583_datetime(w: &WallClock) -> DateTime {
+    DateTime {
+        year_low2: (w.year % 4) as u8,
+        month: w.month,
+        date: w.date,
+        weekday: w.weekday_sun0(),
+        hour: w.hour,
+        minute: w.minute,
+        second: w.second,
+        hundredths: 0,
+    }
+}
+
+fn ds1307_datetime(w: &WallClock) -> ds1307::DateTime {
+    ds1307::DateTime {
+        year: (w.year % 100) as u8,
+        month: w.month,
+        date: w.date,
+        weekday: w.weekday_sun0() + 1, // DS1307 weekday is 1-7, arbitrary correspondence
+        hour: w.hour,
+        minute: w.minute,
+        second: w.second,
+    }
+}
+
+fn ds1629_datetime(w: &WallClock) -> ds1629::DateTime {
+    ds1629::DateTime {
+        year: (w.year % 100) as u8,
+        month: w.month,
+        date: w.date,
+        weekday: w.weekday_sun0() + 1, // DS1629 weekday is 1-7, arbitrary correspondence
+        hour: w.hour,
+        minute: w.minute,
+        second: w.second,
+    }
+}
+
+fn r2025_datetime(w: &WallClock) -> r2025::DateTime {
+    r2025::DateTime {
+        year: (w.year % 100) as u8,
+        month: w.month,
+        date: w.date,
+        weekday: w.weekday_sun0(), // R2025 weekday is 0-6, arbitrary correspondence
+        hour: w.hour,
+        minute: w.minute,
+        second: w.second,
+    }
 }
 
 impl Board {
@@ -151,9 +224,37 @@ impl Board {
             .ltc2990_enabled
             .then(|| attach(&mut bus, config.ltc2990_address, Ltc2990::new()));
 
-        let pcf8583 = config
-            .pcf8583_enabled
-            .then(|| attach(&mut bus, config.pcf8583_address, Pcf8583::new()));
+        let pcf8583 = config.pcf8583_enabled.then(|| {
+            let mut dev = Pcf8583::new();
+            if let Some(w) = &config.pcf8583_time {
+                dev.set_time(pcf8583_datetime(w));
+            }
+            attach(&mut bus, config.pcf8583_address, dev)
+        });
+
+        let ds1307 = config.ds1307_enabled.then(|| {
+            let mut dev = Ds1307::new();
+            if let Some(w) = &config.ds1307_time {
+                dev.set_time(ds1307_datetime(w));
+            }
+            attach(&mut bus, DS1307_ADDRESS, dev)
+        });
+
+        let ds1629 = config.ds1629_enabled.then(|| {
+            let mut dev = Ds1629::new();
+            if let Some(w) = &config.ds1629_time {
+                dev.set_time(ds1629_datetime(w));
+            }
+            attach(&mut bus, DS1629_ADDRESS, dev)
+        });
+
+        let r2025 = config.r2025_enabled.then(|| {
+            let mut dev = R2025::new();
+            if let Some(w) = &config.r2025_time {
+                dev.set_time(r2025_datetime(w));
+            }
+            attach(&mut bus, R2025_ADDRESS, dev)
+        });
 
         let fan = config
             .fan_enabled
@@ -175,6 +276,15 @@ impl Board {
         if pcf8583.is_some() {
             device_addresses.push(("pcf8583", config.pcf8583_address));
         }
+        if ds1307.is_some() {
+            device_addresses.push(("ds1307", DS1307_ADDRESS));
+        }
+        if ds1629.is_some() {
+            device_addresses.push(("ds1629", DS1629_ADDRESS));
+        }
+        if r2025.is_some() {
+            device_addresses.push(("r2025", R2025_ADDRESS));
+        }
         if fan.is_some() {
             device_addresses.push(("fan", MAX31760_ADDRESS));
         }
@@ -187,6 +297,9 @@ impl Board {
             lm75,
             ltc2990,
             pcf8583,
+            ds1307,
+            ds1629,
+            r2025,
             fan,
             device_addresses,
         }
@@ -229,6 +342,21 @@ impl Board {
     }
     pub fn set_pcf8583_time(&self, time: DateTime) {
         if let Some(dev) = &self.pcf8583 {
+            dev.borrow_mut().set_time(time);
+        }
+    }
+    pub fn set_ds1307_time(&self, time: ds1307::DateTime) {
+        if let Some(dev) = &self.ds1307 {
+            dev.borrow_mut().set_time(time);
+        }
+    }
+    pub fn set_ds1629_time(&self, time: ds1629::DateTime) {
+        if let Some(dev) = &self.ds1629 {
+            dev.borrow_mut().set_time(time);
+        }
+    }
+    pub fn set_r2025_time(&self, time: r2025::DateTime) {
+        if let Some(dev) = &self.r2025 {
             dev.borrow_mut().set_time(time);
         }
     }
@@ -342,6 +470,57 @@ mod tests {
     const PCF8574_ADDRESS: u8 = 0x20;
 
     #[test]
+    fn wallclock_conversions_truncate_the_year_and_remap_the_weekday_per_device() {
+        // 2026-08-16 is a Sunday (weekday_sun0() == 0).
+        let w = crate::rtc_time::parse("2026-08-16 14:30:05").unwrap();
+
+        let pcf = pcf8583_datetime(&w);
+        assert_eq!(pcf.year_low2, (2026u32 % 4) as u8);
+        assert_eq!(pcf.weekday, 0);
+        assert_eq!((pcf.month, pcf.date, pcf.hour, pcf.minute, pcf.second), (8, 16, 14, 30, 5));
+
+        let ds1307 = ds1307_datetime(&w);
+        assert_eq!(ds1307.year, 26);
+        assert_eq!(ds1307.weekday, 1, "DS1307 weekday is 1-7, Sunday=1");
+
+        let ds1629 = ds1629_datetime(&w);
+        assert_eq!(ds1629.year, 26);
+        assert_eq!(ds1629.weekday, 1, "DS1629 weekday is 1-7, Sunday=1");
+
+        let r2025 = r2025_datetime(&w);
+        assert_eq!(r2025.year, 26);
+        assert_eq!(r2025.weekday, 0, "R2025 weekday is 0-6, Sunday=0");
+    }
+
+    #[test]
+    fn a_configured_initial_time_is_readable_over_the_bus() {
+        let mut board = Board::with_config(BoardConfig {
+            pcf8583_enabled: true,
+            pcf8583_time: Some(crate::rtc_time::parse("2026-08-16 14:30:05").unwrap()),
+            ..BoardConfig::default()
+        });
+        let pcf8583_address = BoardConfig::default().pcf8583_address;
+
+        board.write(2, 1, PIN | ESO | ACK);
+        board.write(0, 1, u32::from(pcf8583_address) << 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        board.write(0, 1, 0x02); // pointer -> seconds register
+        board.tick(CCK_PER_BYTE_PHASE);
+        board.write(2, 1, PIN | ESO | STO | ACK);
+
+        board.write(0, 1, (u32::from(pcf8583_address) << 1) | 1);
+        board.write(2, 1, PIN | ESO | STA | ACK);
+        board.tick(CCK_PER_BYTE_PHASE);
+        let _dummy = board.read(0, 1);
+        board.tick(CCK_PER_BYTE_PHASE);
+        let seconds = board.read(0, 1);
+        board.write(2, 1, PIN | ESO | STO | ACK);
+
+        assert_eq!(seconds, 0x05, "seconds BCD for :05, read back from a configured initial time");
+    }
+
+    #[test]
     fn even_word_offset_0_reaches_the_a0_area_and_offset_2_reaches_s1() {
         let mut board = Board::new();
 
@@ -449,6 +628,9 @@ mod tests {
         assert!(board.eeprom.is_none());
         assert!(board.lm75.is_none());
         assert!(board.pcf8583.is_none());
+        assert!(board.ds1307.is_none());
+        assert!(board.ds1629.is_none());
+        assert!(board.r2025.is_none());
     }
 
     #[test]
