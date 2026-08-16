@@ -172,8 +172,8 @@ in this repository patches or special-cases any of it:
 | `i2c.library` v40 ("bcu"/PCF8584 driver, Wilhelm Noeker/Brian Ipsen) | Detects the board via AutoConfig (manufacturer 5001, product 15) |
 | `I2CScan` (Aminet `docs/hard/i2clib40`) | Full bus scan finds all three default devices, each confirmed via a real address+W *and* address+R (1-byte master-receive, exercising the dummy-read pipeline) transaction: `0x40/0x41` (PCF8574), `0x98/0x99` (LTC2990), `0xa0/0xa1` (MAX31760) |
 | `FannyCtl` (Henryk Richter, [`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master) repo) | Reads the MAX31760's full register/LUT state at its documented default address (0xA0) without error |
-| `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels |
-| `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, both `Devs:Sensors/*.cfg` config files parsed successfully |
+| `i2csensors.library` + `simplesensors` | Opens, reads LTC2990 voltage/temperature channels matching the configured values (VCC 5.0000V, V1 5.0001V, V2 11.9999V, Tint 25.0000°C), reads the MAX31760's fan/temperature channels, and (via `examples/Sensors/LM75.cfg`, this project's own since no official one exists upstream) reads the LM75's temperature channel matching its configured value (25.0000°C default) |
+| `diagnostics` | Confirms `i2c.library`/`i2csensors.library` present, all three `Devs:Sensors/*.cfg` config files parsed successfully |
 | `I2Clock` (Henryk Richter, `i2csensors` repo) | `SCAN` identifies all four RTCs by vendor/chip name at their real addresses (`0x9E`/DS1629, `0xA0`/PCF8583, `0xD0`/DS1307, `0x64`/R2025); `SAVE` then `SHOW` per chip proves the bus-write path, not just reads — it stores the guest's live system time on the chip and reads it straight back |
 
 This is the full oracle validation `PLAN.md`'s Phase 1/2 success criteria
@@ -191,6 +191,19 @@ notes on each). All of `FannyCtl`/`i2csensors.library`/`simplesensors`/
 [`i2csensors`](https://gitlab.com/HenrykRichter/i2csensors/-/tree/master)
 repo — useful general-purpose Amiga I2C tooling beyond just this
 board's own oracle pass.
+
+Not every device has (or can have) a `Devs:Sensors/*.cfg` sample: that
+format only covers `i2csensors.library`'s five sensor types (`TEMP`,
+`VOLTAGE`, `CURRENT`, `FAN`, `PRESSURE`) — LTC2990 and MAX31760 already
+had official ones upstream, LM75 got its own above, but the RTCs don't
+fit that format at all (there's no clock/calendar sensor type; `I2Clock`
+is the right tool for those instead), and neither do PCF8574 (GPIO),
+the EEPROM, or the LCD. If you write your own `Devs:Sensors/*.cfg`, two
+real quirks of `i2csensors.library`'s parser (`sensors/src/config.c`)
+are worth knowing: it expects Latin-1, not UTF-8 (a `°` written as UTF-8
+silently breaks a config file's device count), and it treats a closing
+`]` as ending the current section *even inside a `#` comment* — both
+found the hard way while writing `examples/Sensors/LM75.cfg`.
 
 ## License
 

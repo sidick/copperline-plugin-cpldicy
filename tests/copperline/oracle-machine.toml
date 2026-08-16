@@ -26,7 +26,7 @@ write_protected = true
 
 [[zorro]]
 metadata = "../../manifest/cpldicy.toml"
-config = { pcf8583 = "true", ds1307 = "true", ds1629 = "true", r2025 = "true" }
+config = { pcf8583 = "true", ds1307 = "true", ds1629 = "true", r2025 = "true", lm75 = "true" }
 
 [[filesys]]
 path = "oracle-out"
