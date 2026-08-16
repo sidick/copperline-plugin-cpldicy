@@ -8,9 +8,10 @@
 #
 # Binaries come from nondistributable/ (git-ignored -- see that
 # directory's own provenance notes / docs/board-facts.md §7): i2c.library
-# v40's "bcu" driver + I2CScan from Aminet docs/hard/i2clib40.lha, and
-# i2csensors.library/simplesensors/FannyCtl/I2Clock compiled binaries
-# checked into Henryk Richter's gitlab.com/HenrykRichter/i2csensors repo.
+# v40's "bcu" driver + I2CScan/SendI2C/ReceiveI2C from Aminet
+# docs/hard/i2clib40.lha, and i2csensors.library/simplesensors/FannyCtl/
+# I2Clock compiled binaries checked into Henryk Richter's
+# gitlab.com/HenrykRichter/i2csensors repo.
 # I2Clock CHIP=<x> SAVE SHOW exercises the RTC devices' bus-write path,
 # not just reads -- it stores the guest's current system time on the
 # chip, then reads it straight back. simplesensors additionally reads
@@ -18,6 +19,10 @@
 # AM2320 configs, there's no official upstream one for the LM75, so
 # it's authored in this repo instead (examples/Sensors/LM75.cfg,
 # tracked in git, not fetched from nondistributable/).
+# SendI2C/ReceiveI2C exercise the PCF8574's GPIO *write* path the same
+# way -- I2CScan's bus scan only ever reads it (see issue #7): SendI2C
+# writes a distinct byte (0xA5) to its output latch, ReceiveI2C reads
+# it straight back.
 #
 # Output capture: these are ordinary AmigaDOS-linked binaries (not the
 # freestanding RawPutChar-over-serial probes the tier-2 rig uses), so
@@ -62,11 +67,13 @@ FANNYCTL="$NONDIST/i2csensors/FannyCtl"
 LTC2990_CFG="$NONDIST/i2csensors/Sensors/LTC2990.cfg"
 MAX31760_CFG="$NONDIST/i2csensors/Sensors/MAX31760_A0_Fanny.cfg"
 I2CLOCK="$NONDIST/i2csensors/I2Clock"
+SENDI2C="$NONDIST/i2clib40/i2clib40/bin/SendI2C"
+RECEIVEI2C="$NONDIST/i2clib40/i2clib40/bin/ReceiveI2C"
 LM75_CFG="$ROOT/examples/Sensors/LM75.cfg" # ours, not fetched -- see that file's own header
 BMP280_CFG="$NONDIST/i2csensors/Sensors/BMP280.cfg"
 BME680_CFG="$NONDIST/i2csensors/Sensors/BME680.cfg"
 AM2320_CFG="$NONDIST/i2csensors/Sensors/AM2320.cfg"
-for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG" "$I2CLOCK" "$LM75_CFG" "$BMP280_CFG" "$BME680_CFG" "$AM2320_CFG"; do
+for f in "$I2C_BCU" "$I2CSCAN" "$I2CSENSORS_LIB" "$SIMPLESENSORS" "$DIAGNOSTICS" "$FANNYCTL" "$LTC2990_CFG" "$MAX31760_CFG" "$I2CLOCK" "$LM75_CFG" "$BMP280_CFG" "$BME680_CFG" "$AM2320_CFG" "$SENDI2C" "$RECEIVEI2C"; do
     [ -e "$f" ] || { echo "FAIL: missing oracle binary $f (run 'make fetch-oracle')" >&2; exit 2; }
 done
 
@@ -84,6 +91,8 @@ rm -f "$ADF"
     write "$DIAGNOSTICS" c/diagnostics + \
     write "$FANNYCTL" c/fannyctl + \
     write "$I2CLOCK" c/i2clock + \
+    write "$SENDI2C" c/sendi2c + \
+    write "$RECEIVEI2C" c/receivei2c + \
     write "$I2C_BCU" libs/i2c.library + \
     write "$I2CSENSORS_LIB" libs/i2csensors.library + \
     write "$LTC2990_CFG" devs/sensors/ltc2990.cfg + \
@@ -136,6 +145,12 @@ cat "$OUTDIR/08-i2clock-ds1629.log" 2>/dev/null || echo "(missing)"
 echo ""
 echo "===== I2Clock R2025 (SAVE + SHOW) ====="
 cat "$OUTDIR/09-i2clock-r2025.log" 2>/dev/null || echo "(missing)"
+echo ""
+echo "===== SendI2C: write 0xA5 to the PCF8574 output latch ====="
+cat "$OUTDIR/10a-pcf8574-write.log" 2>/dev/null || echo "(missing)"
+echo "===== ReceiveI2C: PCF8574 output latch read back ====="
+cat "$OUTDIR/10-pcf8574-readback.log" 2>/dev/null || echo "(missing)"
+echo "(expect: A5)"
 echo ""
 
 echo "Oracle pass ran to completion. Inspect the logs above (and $OUTDIR) for pass/fail judgement -- unlike run.sh, this script doesn't grep for PASS/FAIL markers, since it's driving unmodified third-party tools with their own native output formats, not this project's own probe."

@@ -6,4 +6,6 @@ c/i2clock SCAN >ORACLEOUT:05-i2clock-scan.log
 c/i2clock CHIP=DS1307 SAVE SHOW >ORACLEOUT:07-i2clock-ds1307.log
 c/i2clock CHIP=DS1629 SAVE SHOW >ORACLEOUT:08-i2clock-ds1629.log
 c/i2clock CHIP=R2025 SAVE SHOW >ORACLEOUT:09-i2clock-r2025.log
+c/sendi2c 40 A5 >ORACLEOUT:10a-pcf8574-write.log
+c/receivei2c 40 1 >ORACLEOUT:10-pcf8574-readback.log
 echo "done" >ORACLEOUT:00-done.log
