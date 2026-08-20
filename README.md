@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **This repository has moved to [CopperlineHQ/copperline-plugin-cpldicy](https://github.com/CopperlineHQ/copperline-plugin-cpldicy)** — all issues and releases were migrated there, and this copy is archived. Please open issues and download releases from the new location.
+
 # copperline-plugin-cpldicy
 
 A [Copperline](https://github.com/CopperlineHQ/Copperline) WASM Zorro
